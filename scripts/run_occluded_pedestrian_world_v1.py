@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from perception.world_coordinates import enrich_detection_packet
+from perception.world_coordinates_debug import debug_walkers
 
 
 # ============================================================
@@ -619,6 +620,13 @@ def main():
             add_status(
                 rsu_view,
                 world_position_text(rsu_ped),
+            )
+
+            # PERCEPTINET_WORLD_DEBUG
+            debug_walkers(
+                rsu_view,
+                world,
+                rsu_camera
             )
 
             combined = np.hstack(
