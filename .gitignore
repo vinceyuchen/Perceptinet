@@ -1,28 +1,55 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.pytest_cache/
 
+# Virtual environments
 .venv/
 venv/
 
+# IDE
 .vscode/
 .idea/
 
+# ML model weights
 *.pt
 *.pth
 *.onnx
 *.engine
+models/
 
-models/*
+# CARLA runtime / large files
+CarlaUE4/
+Engine/
+HDMaps/
+PythonAPI/
+Co-Simulation/
+*.exe
 
+# Generated outputs
 runs/
-results/
 output/
 recordings/
 datasets/
 
-*.log
-*.tmp
+# Large media
+*.mp4
+*.avi
+*.mov
 
+# Temporary
+*.tmp
+*.temp
+*.log
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Secrets / local config
+.env
+*.key
+*.pem
+credentials.json
