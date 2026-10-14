@@ -583,6 +583,10 @@ def main():
             # controller after each Risk Engine assessment.
             # ------------------------------------------------
 
+            # Speed commanded for THIS simulation tick.
+            # Keep this separate from the speed command that
+            # will be calculated for the NEXT tick.
+            ego_speed_this_tick_mps = ego_command_speed_mps
             ego_motion_speed_mps = 0.0
 
             fixed_delta = (
@@ -602,10 +606,11 @@ def main():
             # BrakingController well before this distance.
             if ego_to_pedestrian_m <= EGO_STOP_DISTANCE_M:
                 ego_command_speed_mps = 0.0
+                ego_speed_this_tick_mps = 0.0
 
-            if ego_command_speed_mps > 0.0:
+            if ego_speed_this_tick_mps > 0.0:
                 step_m = (
-                    ego_command_speed_mps
+                    ego_speed_this_tick_mps
                     * fixed_delta
                 )
 
@@ -631,7 +636,7 @@ def main():
                 )
 
                 ego_motion_speed_mps = (
-                    ego_command_speed_mps
+                    ego_speed_this_tick_mps
                 )
 
                 ego_travelled_m += step_m
@@ -782,7 +787,7 @@ def main():
             # scenario, therefore CARLA get_velocity() remains
             # zero. Use the actual commanded kinematic speed
             # for Risk Assessment v1.
-            ego_speed_mps = ego_motion_speed_mps
+            ego_speed_mps = ego_speed_this_tick_mps
 
             ego_state = {
                 "world_position": {
@@ -840,7 +845,7 @@ def main():
                     )
 
             braking_command = braking_controller.update(
-                current_speed_mps=ego_motion_speed_mps,
+                current_speed_mps=ego_speed_this_tick_mps,
                 hazard_level=latched_pedestrian_hazard,
                 dt_s=fixed_delta,
             )
