@@ -604,6 +604,15 @@ def main():
                 rsu_camera
             )
 
+            # Save one clean raw association debug image before headers/status.
+            # White/YOLO boxes come from YOLO.
+            # Green box comes from CARLA ground-truth projection.
+            if rsu_ped is not None and not hasattr(main, "_assoc_debug_saved"):
+                debug_path = results_dir / "world_assoc_debug.png"
+                cv2.imwrite(str(debug_path), rsu_view)
+                main._assoc_debug_saved = True
+                print(f"[ASSOC DEBUG IMAGE] {debug_path}")
+
             onboard_view = cv2.resize(
                 onboard_view,
                 (PREVIEW_WIDTH, PREVIEW_HEIGHT),
