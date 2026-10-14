@@ -595,6 +595,15 @@ def main():
                 rsu_packet["detections"],
             )
 
+            # PERCEPTINET_WORLD_DEBUG_RAW
+            # Draw CARLA projected bbox in the SAME raw image space
+            # used by YOLO before any preview resizing.
+            debug_walkers(
+                rsu_view,
+                world,
+                rsu_camera
+            )
+
             onboard_view = cv2.resize(
                 onboard_view,
                 (PREVIEW_WIDTH, PREVIEW_HEIGHT),
@@ -620,13 +629,6 @@ def main():
             add_status(
                 rsu_view,
                 world_position_text(rsu_ped),
-            )
-
-            # PERCEPTINET_WORLD_DEBUG
-            debug_walkers(
-                rsu_view,
-                world,
-                rsu_camera
             )
 
             combined = np.hstack(
