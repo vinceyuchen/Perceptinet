@@ -601,12 +601,9 @@ def main():
                 pedestrian_now.location
             )
 
-            # Final hard failsafe only.
-            # Normal stopping should happen through Risk +
-            # BrakingController well before this distance.
-            if ego_to_pedestrian_m <= EGO_STOP_DISTANCE_M:
-                ego_command_speed_mps = 0.0
-                ego_speed_this_tick_mps = 0.0
+            # Do not stop the vehicle here using raw CARLA
+            # actor distance. The final failsafe is applied
+            # later using the fused pedestrian Risk result.
 
             if ego_speed_this_tick_mps > 0.0:
                 step_m = (
@@ -854,6 +851,23 @@ def main():
             ego_command_speed_mps = braking_command[
                 "target_speed_mps"
             ]
+
+            # Final simulation failsafe.
+            # Use the SAME fused pedestrian representation
+            # consumed by RiskEngine rather than a separate
+            # raw CARLA actor-distance path.
+            if (
+                pedestrian_risk is not None
+                and pedestrian_risk["distance_m"]
+                <= EGO_STOP_DISTANCE_M
+            ):
+                ego_command_speed_mps = 0.0
+
+                print(
+                    "FINAL FAILSAFE STOP | "
+                    f'distance='
+                    f'{pedestrian_risk["distance_m"]:.2f}m'
+                )
 
             if (
                 braking_command["braking_active"]
