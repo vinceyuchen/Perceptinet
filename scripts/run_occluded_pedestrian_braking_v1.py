@@ -64,8 +64,20 @@ CLASS_NAME_OVERRIDES = {
 }
 
 OCCLUDER_FORWARD_DISTANCES = [12.0, 15.0, 18.0, 21.0]
+
+# Keep the occluding truck beside the Ego centre path rather
+# than directly inside it. The pedestrian remains behind the
+# inner edge of the truck from the Onboard Camera viewpoint.
+OCCLUDER_LATERAL_OFFSET_M = 2.4
+
 PEDESTRIAN_FORWARD_FROM_OCCLUDER = 8.0
-PEDESTRIAN_LATERAL_OFFSETS = [0.7, -0.7, 1.2, -1.2]
+
+# Relative to the truck. With a +2.4 m truck offset these
+# produce pedestrian lateral positions around +1.7 to +2.3 m
+# from the Ego path, still inside RiskEngine's 2.5 m corridor.
+PEDESTRIAN_LATERAL_OFFSETS = [-0.3, -0.5, -0.1, -0.7]
+
+TRUCK_PATH_CLEARANCE_MIN_M = 0.10
 
 RSU_FORWARD = 20.0
 RSU_LATERAL = -10.0
@@ -443,6 +455,7 @@ def main():
             loc = relative_location(
                 ego_transform,
                 forward=distance,
+                lateral=OCCLUDER_LATERAL_OFFSET_M,
                 vertical=0.2,
             )
 
@@ -466,6 +479,62 @@ def main():
 
         actors.append(occluder_vehicle)
         occluder_vehicle.set_simulate_physics(False)
+
+        # ----------------------------------------------------
+        # Verify that the truck no longer intersects the
+        # deterministic Ego centre path.
+        #
+        # Both actors use the same road heading in this demo,
+        # therefore CARLA bounding-box half widths can be used
+        # directly for this lateral clearance check.
+        # ----------------------------------------------------
+
+        ego_half_width_m = float(
+            ego_vehicle.bounding_box.extent.y
+        )
+
+        truck_half_width_m = float(
+            occluder_vehicle.bounding_box.extent.y
+        )
+
+        ego_right = ego_transform.get_right_vector()
+
+        truck_dx = (
+            occluder_transform.location.x
+            - ego_transform.location.x
+        )
+        truck_dy = (
+            occluder_transform.location.y
+            - ego_transform.location.y
+        )
+
+        truck_lateral_m = (
+            truck_dx * ego_right.x
+            + truck_dy * ego_right.y
+        )
+
+        truck_path_clearance_m = (
+            abs(truck_lateral_m)
+            - ego_half_width_m
+            - truck_half_width_m
+        )
+
+        print(
+            "Truck path geometry | "
+            f"lateral={truck_lateral_m:.2f}m | "
+            f"ego_half_width={ego_half_width_m:.2f}m | "
+            f"truck_half_width={truck_half_width_m:.2f}m | "
+            f"clearance={truck_path_clearance_m:.2f}m"
+        )
+
+        if (
+            truck_path_clearance_m
+            < TRUCK_PATH_CLEARANCE_MIN_M
+        ):
+            raise RuntimeError(
+                "Occluding truck intersects Ego path: "
+                f"clearance={truck_path_clearance_m:.2f}m"
+            )
 
         pedestrian_base = carla.Transform(
             occluder_transform.location,
@@ -499,6 +568,36 @@ def main():
         )
 
         actors.append(pedestrian)
+
+        pedestrian_dx = (
+            pedestrian_transform.location.x
+            - ego_transform.location.x
+        )
+        pedestrian_dy = (
+            pedestrian_transform.location.y
+            - ego_transform.location.y
+        )
+
+        pedestrian_lateral_m = (
+            pedestrian_dx * ego_right.x
+            + pedestrian_dy * ego_right.y
+        )
+
+        print(
+            "Pedestrian path geometry | "
+            f"lateral={pedestrian_lateral_m:.2f}m | "
+            f"risk_corridor="
+            f"+/-{RiskConfig().lane_half_width_m:.2f}m"
+        )
+
+        if (
+            abs(pedestrian_lateral_m)
+            > RiskConfig().lane_half_width_m
+        ):
+            raise RuntimeError(
+                "Pedestrian is outside RiskEngine path corridor: "
+                f"lateral={pedestrian_lateral_m:.2f}m"
+            )
 
         # ----------------------------------------------------
         # Deterministic Ego path frame
