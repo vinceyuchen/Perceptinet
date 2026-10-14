@@ -29,7 +29,7 @@ from control.braking_controller import BrakingController, BrakingConfig
 # Deterministic kinematic Ego motion for Risk Transition v1.
 # Physics remains disabled in this stage.
 EGO_TEST_SPEED_MPS = 4.0
-EGO_STOP_DISTANCE_M = 0.5
+EGO_STOP_DISTANCE_M = 1.5
 
 
 
@@ -500,6 +500,83 @@ def main():
 
         actors.append(pedestrian)
 
+        # ----------------------------------------------------
+        # Deterministic Ego path frame
+        #
+        # The scenario itself was constructed relative to the
+        # original Ego transform. Freeze that same direction
+        # for both motion and risk assessment.
+        # ----------------------------------------------------
+
+        raw_path_forward = ego_transform.get_forward_vector()
+
+        path_norm = math.hypot(
+            raw_path_forward.x,
+            raw_path_forward.y,
+        )
+
+        if path_norm <= 1e-6:
+            raise RuntimeError("Invalid Ego path direction")
+
+        ego_path_forward = carla.Vector3D(
+            x=raw_path_forward.x / path_norm,
+            y=raw_path_forward.y / path_norm,
+            z=0.0,
+        )
+
+        # Make absolutely sure the frozen direction points
+        # toward the pedestrian rather than away from it.
+        to_pedestrian_x = (
+            pedestrian_transform.location.x
+            - ego_transform.location.x
+        )
+        to_pedestrian_y = (
+            pedestrian_transform.location.y
+            - ego_transform.location.y
+        )
+
+        path_dot = (
+            ego_path_forward.x * to_pedestrian_x
+            + ego_path_forward.y * to_pedestrian_y
+        )
+
+        if path_dot < 0.0:
+            ego_path_forward.x *= -1.0
+            ego_path_forward.y *= -1.0
+
+        # RiskEngine uses the mathematical heading generated
+        # from this exact XY movement vector.
+        ego_path_yaw_deg = math.degrees(
+            math.atan2(
+                ego_path_forward.y,
+                ego_path_forward.x,
+            )
+        )
+
+        # Preserve the original visual orientation for the
+        # vehicle and attached Onboard Camera.
+        ego_path_rotation = carla.Rotation(
+            pitch=ego_transform.rotation.pitch,
+            yaw=ego_transform.rotation.yaw,
+            roll=ego_transform.rotation.roll,
+        )
+
+        initial_path_distance = (
+            ego_transform.location.distance(
+                pedestrian_transform.location
+            )
+        )
+
+        print(
+            "Ego path locked | "
+            f"forward=("
+            f"{ego_path_forward.x:.3f}, "
+            f"{ego_path_forward.y:.3f}) | "
+            f"risk_yaw={ego_path_yaw_deg:.2f}deg | "
+            f"pedestrian_distance="
+            f"{initial_path_distance:.2f}m"
+        )
+
         onboard_camera = world.spawn_actor(
             camera_bp,
             carla.Transform(
@@ -611,32 +688,58 @@ def main():
                     * fixed_delta
                 )
 
-                forward = ego_now.get_forward_vector()
-
-                next_ego_transform = carla.Transform(
-                    carla.Location(
-                        x=(
-                            ego_now.location.x
-                            + forward.x * step_m
-                        ),
-                        y=(
-                            ego_now.location.y
-                            + forward.y * step_m
-                        ),
-                        z=ego_now.location.z,
+                next_ego_location = carla.Location(
+                    x=(
+                        ego_now.location.x
+                        + ego_path_forward.x * step_m
                     ),
-                    ego_now.rotation,
+                    y=(
+                        ego_now.location.y
+                        + ego_path_forward.y * step_m
+                    ),
+                    z=ego_now.location.z,
                 )
 
-                ego_vehicle.set_transform(
-                    next_ego_transform
+                next_distance_to_pedestrian = (
+                    next_ego_location.distance(
+                        pedestrian_now.location
+                    )
                 )
 
-                ego_motion_speed_mps = (
-                    ego_speed_this_tick_mps
-                )
+                # Simulation-only motion guard.
+                # A moving Ego must get closer to the test
+                # pedestrian. Stop immediately if the geometry
+                # becomes inconsistent instead of allowing a
+                # runaway vehicle through the CARLA map.
+                if (
+                    next_distance_to_pedestrian
+                    > ego_to_pedestrian_m + 0.001
+                ):
+                    ego_command_speed_mps = 0.0
+                    ego_speed_this_tick_mps = 0.0
 
-                ego_travelled_m += step_m
+                    print(
+                        "MOTION GUARD STOP | "
+                        f"before={ego_to_pedestrian_m:.2f}m | "
+                        f"after="
+                        f"{next_distance_to_pedestrian:.2f}m"
+                    )
+
+                else:
+                    next_ego_transform = carla.Transform(
+                        next_ego_location,
+                        ego_path_rotation,
+                    )
+
+                    ego_vehicle.set_transform(
+                        next_ego_transform
+                    )
+
+                    ego_motion_speed_mps = (
+                        ego_speed_this_tick_mps
+                    )
+
+                    ego_travelled_m += step_m
 
             world.tick()
 
@@ -792,7 +895,7 @@ def main():
                     "y": float(ego_transform.location.y),
                     "z": float(ego_transform.location.z),
                 },
-                "yaw_deg": float(ego_transform.rotation.yaw),
+                "yaw_deg": float(ego_path_yaw_deg),
                 "speed_mps": float(ego_speed_mps),
             }
 
