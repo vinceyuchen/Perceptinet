@@ -638,6 +638,50 @@ def main():
             )
         )
 
+        # ----------------------------------------------------
+        # Settle CARLA actor state before the control loop.
+        #
+        # In synchronous mode, actors spawned in the current
+        # frame may report stale transforms until the world
+        # has advanced. Motion/risk logic must never consume
+        # those un-synchronised transforms.
+        # ----------------------------------------------------
+
+        print()
+        print("Settling CARLA scene...")
+
+        for _ in range(2):
+            world.tick()
+
+        settled_ego = ego_vehicle.get_transform()
+        settled_pedestrian = pedestrian.get_transform()
+
+        settled_distance_m = (
+            settled_ego.location.distance(
+                settled_pedestrian.location
+            )
+        )
+
+        print(
+            "Scenario settled | "
+            f"ego=("
+            f"{settled_ego.location.x:.2f}, "
+            f"{settled_ego.location.y:.2f}) | "
+            f"pedestrian=("
+            f"{settled_pedestrian.location.x:.2f}, "
+            f"{settled_pedestrian.location.y:.2f}) | "
+            f"distance={settled_distance_m:.2f}m"
+        )
+
+        # Fail loudly instead of silently zeroing Ego speed
+        # if CARLA actor state is still inconsistent.
+        if settled_distance_m < 5.0:
+            raise RuntimeError(
+                "Invalid settled scenario geometry: "
+                f"Ego-pedestrian distance="
+                f"{settled_distance_m:.2f}m"
+            )
+
         print()
         print("World Coordinate Test running")
         print("Expected:")
