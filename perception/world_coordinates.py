@@ -290,17 +290,6 @@ def match_detection_to_actor(
 
     best = candidates[0]
 
-    # TEMP DEBUG: inspect pedestrian association numerically
-    if class_name == "pedestrian":
-        print(
-            "[WORLD ASSOC DEBUG] "
-            f"YOLO={yolo_bbox} | "
-            f"CARLA={best['projection']['bbox']} | "
-            f"IoU={best['iou']:.4f} | "
-            f"center={best['center_distance']:.2f}px | "
-            f"actor={best['actor'].id} | "
-            f"image={image_width}x{image_height}"
-        )
 
     # Practical V1 gate:
     # accept reasonable overlap, otherwise accept a close projected bbox.

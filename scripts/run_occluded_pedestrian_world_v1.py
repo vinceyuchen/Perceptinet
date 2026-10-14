@@ -20,7 +20,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from perception.world_coordinates import enrich_detection_packet
-from perception.world_coordinates_debug import debug_walkers
 
 
 # ============================================================
@@ -595,23 +594,7 @@ def main():
                 rsu_packet["detections"],
             )
 
-            # PERCEPTINET_WORLD_DEBUG_RAW
-            # Draw CARLA projected bbox in the SAME raw image space
-            # used by YOLO before any preview resizing.
-            debug_walkers(
-                rsu_view,
-                world,
-                rsu_camera
-            )
 
-            # Save one clean raw association debug image before headers/status.
-            # White/YOLO boxes come from YOLO.
-            # Green box comes from CARLA ground-truth projection.
-            if rsu_ped is not None and not hasattr(main, "_assoc_debug_saved"):
-                debug_path = results_dir / "world_assoc_debug.png"
-                cv2.imwrite(str(debug_path), rsu_view)
-                main._assoc_debug_saved = True
-                print(f"[ASSOC DEBUG IMAGE] {debug_path}")
 
             onboard_view = cv2.resize(
                 onboard_view,
