@@ -192,10 +192,17 @@ def main():
         stale=True,
     )
 
+    app.set_mode(app.PRO_MODE)
+    pro_stale = app.render(
+        snapshot,
+        stale=True,
+    )
+
     paths = {
         "driver": output_dir / "driver_mode_polish.png",
         "pro": output_dir / "pro_mode_polish.png",
         "stale": output_dir / "driver_mode_stale.png",
+        "pro_stale": output_dir / "pro_mode_stale.png",
     }
 
     cv2.imwrite(
@@ -210,11 +217,16 @@ def main():
         str(paths["stale"]),
         stale,
     )
+    cv2.imwrite(
+        str(paths["pro_stale"]),
+        pro_stale,
+    )
 
     print("=== Perceptinet Dashboard Final Polish Preview ===")
     print("Driver:", paths["driver"])
     print("Pro:", paths["pro"])
     print("Stale:", paths["stale"])
+    print("Pro stale:", paths["pro_stale"])
     print("DASHBOARD POLISH PREVIEW READY")
 
 
