@@ -237,6 +237,26 @@ def main():
             == 24.70
         )
 
+        snapshot_path = tmp_path / "dashboard_snapshot.json"
+
+        layer.write_snapshot_json(
+            snapshot,
+            snapshot_path,
+        )
+
+        published_snapshot = json.loads(
+            snapshot_path.read_text(encoding="utf-8")
+        )
+
+        assert (
+            published_snapshot["schema_version"]
+            == "dashboard-v1"
+        )
+        assert (
+            published_snapshot["hazard"]["control_level"]
+            == "WARNING"
+        )
+
     print("=== Perceptinet Dashboard Data Layer v1 Test ===")
     print(
         "Driver core:",
