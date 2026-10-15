@@ -42,15 +42,22 @@ def main() -> None:
         markers = []
         dashboard = FakeProcess()
         scenario_count = [0]
+        dashboard_snapshots = []
+        scenario_snapshots = []
 
         def spawn(command, **kwargs):
             script = str(command[1]).replace("\\", "/")
             if script.endswith("scripts/run_dashboard.py"):
+                target = command[command.index("--snapshot") + 1]
+                dashboard_snapshots.append(target)
                 return dashboard
             assert script.endswith("scripts/run_occluded_pedestrian_braking_v1.py")
             scenario_count[0] += 1
             env = kwargs["env"]
             assert env["PERCEPTINET_TEACHER_DEMO"] == "1"
+            scenario_snapshots.append(
+                env["PERCEPTINET_DEMO_SNAPSHOT_FILE"]
+            )
             assert env["PERCEPTINET_DEMO_CYCLE_INDEX"] == str(
                 scenario_count[0]
             )
@@ -77,6 +84,13 @@ def main() -> None:
             assert launcher.main(["--cycles", "2", "--hold-seconds", "1"]) == 0
             assert scenario_count[0] == 2
             assert len(markers) == 2
+            assert len(dashboard_snapshots) == 1
+            assert len(scenario_snapshots) == 2
+            assert scenario_snapshots == dashboard_snapshots * 2
+            private_snapshot = Path(dashboard_snapshots[0])
+            assert private_snapshot.parent.parent == folder
+            assert private_snapshot.parent.name.startswith("session_")
+            assert private_snapshot.name == "dashboard_snapshot.json"
 
     # Reject invalid cycle count and invalid demo hold interval.
     try:
