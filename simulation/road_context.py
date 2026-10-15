@@ -73,9 +73,9 @@ class RoadContextSampler:
         self,
         ego_state: Dict[str, Any],
         *,
-        forward_m: float = 40.0,
-        behind_m: float = 8.0,
-        side_m: float = 18.0,
+        forward_m: float = 50.0,
+        behind_m: float = 10.0,
+        side_m: float = 24.0,
     ) -> Optional[Dict[str, Any]]:
         pose = ego_state.get("world_position") or {}
         x = self._finite(pose.get("x"))
