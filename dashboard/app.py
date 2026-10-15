@@ -10,15 +10,23 @@ import numpy as np
 
 from .driver_mode import DriverModeRenderer
 from .pro_mode import ProModeRenderer
-from .ui_theme import draw_text, rounded_rect
+from .ui_theme import (
+    BACKGROUND,
+    BORDER,
+    NAV,
+    SELECTED,
+    SELECTED_TEXT,
+    SURFACE_2,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    draw_text,
+    rounded_rect,
+)
 
 
-BACKGROUND = (10, 10, 10)
-NAV = (22, 22, 22)
-NAV_BORDER = (55, 55, 55)
-WHITE = (240, 240, 240)
-MUTED = (155, 155, 155)
-BLUE = (235, 170, 60)
+NAV_BORDER = BORDER
+WHITE = TEXT_PRIMARY
+MUTED = TEXT_SECONDARY
 
 
 class PerceptinetDashboardApp:
@@ -170,8 +178,8 @@ class PerceptinetDashboardApp:
     ) -> None:
         x1, y1, x2, y2 = rect
 
-        fill = BLUE if active else (38, 38, 38)
-        text_color = (10, 10, 10) if active else WHITE
+        fill = SELECTED if active else SURFACE_2
+        text_color = SELECTED_TEXT if active else WHITE
 
         rounded_rect(
             canvas,
