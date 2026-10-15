@@ -17,7 +17,7 @@ def main():
     controller = BrakingController(
         BrakingConfig(
             caution_decel_mps2=0.0,
-            warning_decel_mps2=0.5,
+            warning_decel_mps2=1.5,
             critical_decel_mps2=6.0,
         )
     )
@@ -88,6 +88,13 @@ def main():
         < caution["target_speed_mps"]
     )
     assert warning["braking_active"] is True
+    assert warning["deceleration_mps2"] == 1.5
+
+    warning_stop = warning[
+        "estimated_stopping_distance_m"
+    ]
+    assert warning_stop is not None
+    assert 5.2 < warning_stop < 5.5
 
     # --------------------------------------------------------
     # CRITICAL emergency braking simulation
