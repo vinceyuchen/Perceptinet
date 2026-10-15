@@ -215,7 +215,7 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "COOPERATIVE PERCEPTION",
+            "ROAD-USER AWARENESS",
             (30, 66),
             scale=0.48,
             color=MUTED,
@@ -236,7 +236,7 @@ class DriverModeRenderer:
         status_pill(
             canvas,
             status_text,
-            (1000, 35),
+            (785, 37),
             foreground=status_color,
             fill=SURFACE_2,
             border=BORDER_SOFT,
@@ -247,27 +247,27 @@ class DriverModeRenderer:
 
         rounded_rect(
             canvas,
-            (875, 47),
-            (1245, 79),
+            (950, 23),
+            (1245, 72),
             fill=SURFACE_3,
-            border=color,
+            border=MUTED if stale else color,
             border_thickness=1,
             radius=8,
         )
         cv2.rectangle(
             canvas,
-            (875, 53),
-            (880, 73),
-            color,
+            (950, 32),
+            (955, 64),
+            MUTED if stale else color,
             -1,
         )
 
         self._put_text(
             canvas,
-            level,
-            (897, 71),
-            scale=0.63,
-            color=color,
+            f"{level} / LAST KNOWN" if stale else level,
+            (975, 55),
+            scale=0.54,
+            color=MUTED if stale else color,
             thickness=2,
         )
 
@@ -275,6 +275,8 @@ class DriverModeRenderer:
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         ego = snapshot.get("ego") or {}
         speed_mps = self._number(
@@ -283,6 +285,12 @@ class DriverModeRenderer:
         ) or 0.0
 
         speed_kmh = speed_mps * 3.6
+        speed_text = f"{speed_kmh:.0f}"
+        speed_scale = 2.12 if len(speed_text) <= 2 else 1.72
+        (speed_width, _), _ = cv2.getTextSize(
+            speed_text, cv2.FONT_HERSHEY_DUPLEX, speed_scale, 4
+        )
+        speed_x = max(55, 207 - speed_width)
 
         self._panel(
             canvas,
@@ -292,7 +300,7 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "SPEED",
+            "LAST KNOWN SPEED" if stale else "SPEED",
             (55, 150),
             scale=0.55,
             color=MUTED,
@@ -301,17 +309,17 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            f"{speed_kmh:4.0f}",
-            (55, 235),
-            scale=2.25,
-            color=WHITE,
+            speed_text,
+            (speed_x, 235),
+            scale=speed_scale,
+            color=MUTED if stale else WHITE,
             thickness=4,
         )
 
         self._put_text(
             canvas,
             "km/h",
-            (205, 235),
+            (219, 235),
             scale=0.58,
             color=MUTED,
             thickness=1,
@@ -330,6 +338,8 @@ class DriverModeRenderer:
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         hazard = snapshot.get("hazard") or {}
         primary = hazard.get("primary")
@@ -346,7 +356,7 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "CURRENT HAZARD",
+            "LAST KNOWN HAZARD" if stale else "CURRENT HAZARD",
             (55, 365),
             scale=0.55,
             color=MUTED,
@@ -356,10 +366,10 @@ class DriverModeRenderer:
         if not primary:
             self._put_text(
                 canvas,
-                "ROAD CLEAR",
+                "NO RECENT DATA" if stale else "ROAD CLEAR",
                 (55, 425),
                 scale=0.9,
-                color=GREEN,
+                color=MUTED if stale else GREEN,
                 thickness=2,
             )
             return
@@ -386,8 +396,8 @@ class DriverModeRenderer:
             canvas,
             class_name,
             (55, 420),
-            scale=0.9,
-            color=color,
+            scale=0.86,
+            color=MUTED if stale else color,
             thickness=2,
         )
 
@@ -414,9 +424,9 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             distance_text,
-            (55, 500),
-            scale=0.78,
-            color=WHITE,
+            (55, 503),
+            scale=0.80,
+            color=MUTED if stale else WHITE,
             thickness=2,
         )
 
@@ -431,28 +441,25 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             ttc_text,
-            (55, 580),
-            scale=0.78,
-            color=color,
+            (55, 577),
+            scale=0.80,
+            color=MUTED if stale else color,
             thickness=2,
         )
 
         if cooperative:
-            rounded_rect(
-                canvas,
-                (55, 591),
-                (280, 617),
-                fill=SURFACE_3,
-                border=BLUE,
-                border_thickness=1,
-                radius=7,
+            # Attribution label, not an interactive control.
+            attribution_color = MUTED if stale else BLUE
+            cv2.circle(
+                canvas, (60, 604), 4,
+                attribution_color, -1, cv2.LINE_AA,
             )
             self._put_text(
                 canvas,
-                "COOPERATIVE DETECTION",
-                (66, 610),
+                "RSU IN LAST SNAPSHOT" if stale else "RSU COOPERATIVE DETECTION",
+                (73, 609),
                 scale=0.36,
-                color=BLUE,
+                color=attribution_color,
                 thickness=1,
             )
 
@@ -460,6 +467,8 @@ class DriverModeRenderer:
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         x1, y1 = 340, 115
         x2, y2 = 930, 625
@@ -472,7 +481,7 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "COOPERATIVE SPATIAL VIEW",
+            "LAST KNOWN SPATIAL VIEW" if stale else "COOPERATIVE SPATIAL VIEW",
             (365, 150),
             scale=0.55,
             color=MUTED,
@@ -542,10 +551,10 @@ class DriverModeRenderer:
         if not primary:
             self._put_text(
                 canvas,
-                "No immediate hazard",
+                "No recent position data" if stale else "No immediate hazard",
                 (center_x - 105, 220),
                 scale=0.58,
-                color=GREEN,
+                color=MUTED if stale else GREEN,
                 thickness=2,
             )
             return
@@ -601,17 +610,26 @@ class DriverModeRenderer:
             canvas,
             (hazard_x, hazard_y),
             class_name,
-            color=color,
+            color=MUTED if stale else color,
             size=marker_size,
             primary=True,
         )
 
+        # Avoid spilling long labels past the world-view boundary.
+        label = class_name.upper()
+        (label_width, _), _ = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_DUPLEX, 0.5, 2
+        )
+        label_x = hazard_x + 34
+        if label_x + label_width > x2 - 16:
+            label_x = hazard_x - label_width - 34
+        label_x = max(x1 + 16, label_x)
         self._put_text(
             canvas,
-            class_name.upper(),
-            (hazard_x + 34, hazard_y + 6),
+            label,
+            (label_x, hazard_y + 6),
             scale=0.5,
-            color=color,
+            color=MUTED if stale else color,
             thickness=2,
         )
 
@@ -619,7 +637,7 @@ class DriverModeRenderer:
             canvas,
             (center_x, ego_y - 22),
             (hazard_x, hazard_y + marker_size),
-            color,
+            MUTED if stale else color,
             1,
             cv2.LINE_AA,
         )
@@ -651,7 +669,7 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "VEHICLE RESPONSE",
+            "LAST KNOWN RESPONSE" if stale else "VEHICLE RESPONSE",
             (985, 150),
             scale=0.52,
             color=MUTED,
@@ -673,7 +691,7 @@ class DriverModeRenderer:
             action,
             (985, 205),
             scale=0.64,
-            color=action_color,
+            color=MUTED if stale else action_color,
             thickness=2,
         )
 
@@ -692,17 +710,29 @@ class DriverModeRenderer:
             )
             self._put_text(
                 canvas,
-                f"{target_speed * 3.6:.0f} km/h",
+                f"{target_speed * 3.6:.1f} km/h",
                 (985, 290),
                 scale=0.72,
                 color=WHITE,
                 thickness=2,
             )
+            self._put_text(
+                canvas,
+                f"{target_speed:.2f} m/s",
+                (985, 315),
+                scale=0.42,
+                color=MUTED,
+                thickness=1,
+            )
 
+        cv2.line(
+            canvas, (985, 336), (1225, 336),
+            BORDER_SOFT, 1, cv2.LINE_AA,
+        )
         self._put_text(
             canvas,
             "PERCEPTION",
-            (985, 350),
+            (985, 367),
             scale=0.42,
             color=MUTED,
             thickness=1,
@@ -719,9 +749,9 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             perception_text,
-            (985, 385),
+            (985, 402),
             scale=0.5,
-            color=BLUE if cooperative else WHITE,
+            color=MUTED if stale else BLUE if cooperative else WHITE,
             thickness=2,
         )
 
@@ -729,10 +759,14 @@ class DriverModeRenderer:
             presentation["display_health"]
         )
 
+        cv2.line(
+            canvas, (985, 431), (1225, 431),
+            BORDER_SOFT, 1, cv2.LINE_AA,
+        )
         self._put_text(
             canvas,
             "SYSTEM",
-            (985, 455),
+            (985, 463),
             scale=0.42,
             color=MUTED,
             thickness=1,
@@ -741,7 +775,7 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             health_status,
-            (985, 490),
+            (985, 502),
             scale=0.58,
             color=(
                 GREEN
@@ -757,7 +791,7 @@ class DriverModeRenderer:
             self._put_text(
                 canvas,
                 "Cooperative perception",
-                (985, 535),
+                (985, 550),
                 scale=0.4,
                 color=MUTED,
                 thickness=1,
@@ -765,7 +799,7 @@ class DriverModeRenderer:
             self._put_text(
                 canvas,
                 "limited",
-                (985, 560),
+                (985, 575),
                 scale=0.4,
                 color=MUTED,
                 thickness=1,
@@ -780,10 +814,15 @@ class DriverModeRenderer:
     ) -> None:
         cv2.rectangle(
             canvas,
-            (0, 655),
+            (0, 663),
             (self.width, self.height),
             PANEL_LIGHT,
             -1,
+        )
+
+        cv2.line(
+            canvas, (0, 663), (self.width, 663),
+            BORDER_SOFT, 1, cv2.LINE_AA,
         )
 
         presentation = derive_presentation_state(
@@ -801,9 +840,9 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             message,
-            (35, 697),
-            scale=0.72,
-            color=self._hazard_color(level),
+            (35, 701),
+            scale=0.63,
+            color=CAUTION if stale else self._hazard_color(level),
             thickness=2,
         )
 
@@ -824,9 +863,9 @@ class DriverModeRenderer:
             snapshot,
             stale=stale,
         )
-        self._draw_speed(canvas, snapshot)
-        self._draw_hazard_card(canvas, snapshot)
-        self._draw_spatial_view(canvas, snapshot)
+        self._draw_speed(canvas, snapshot, stale=stale)
+        self._draw_hazard_card(canvas, snapshot, stale=stale)
+        self._draw_spatial_view(canvas, snapshot, stale=stale)
         self._draw_action_panel(
             canvas,
             snapshot,
