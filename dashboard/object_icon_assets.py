@@ -66,9 +66,10 @@ def draw_icon(canvas: np.ndarray, center: Tuple[int, int], kind: str,
         return False
     cx, cy = center
     if kind == "EGO":
-        cv2.circle(canvas, center, 31, (43, 43, 43), -1, cv2.LINE_AA)
-        cv2.circle(canvas, center, 31, (130, 130, 130), 1, cv2.LINE_AA)
-        side = 39
+        # Driver Map v7.2: compact self marker to avoid dominating targets.
+        cv2.circle(canvas, center, 24, (43, 43, 43), -1, cv2.LINE_AA)
+        cv2.circle(canvas, center, 24, (130, 130, 130), 1, cv2.LINE_AA)
+        side = 31
     elif kind == "PEDESTRIAN":
         if primary:
             cv2.circle(canvas, center, size + 8,
