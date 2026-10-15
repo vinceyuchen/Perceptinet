@@ -741,6 +741,7 @@ def main():
     except ValueError:
         demo_hold_s = 3.0
     demo_stop_since = None
+    dashboard_publish_failures = 0
 
     csv_path = results_dir / "occluded_pedestrian_world_v1.csv"
     metrics_summary_path = results_dir / "metrics_summary.json"
@@ -2178,10 +2179,25 @@ def main():
                 )
             )
 
-            dashboard_data_layer.write_snapshot_json(
-                dashboard_snapshot,
-                dashboard_snapshot_path,
-            )
+            try:
+                dashboard_data_layer.write_snapshot_json(
+                    dashboard_snapshot,
+                    dashboard_snapshot_path,
+                )
+                dashboard_publish_failures = 0
+            except PermissionError as exc:
+                if not teacher_demo:
+                    raise
+                dashboard_publish_failures += 1
+                if dashboard_publish_failures == 1 or dashboard_publish_failures % 10 == 0:
+                    print(
+                        "TEACHER DEMO | Snapshot publish blocked; "
+                        f"dashboard may show DATA STALE (failures={dashboard_publish_failures}): "
+                        f"{exc}"
+                    )
+                # Dashboard transport is presentation only. Never abort
+                # CARLA's independent risk/braking controller because a
+                # Windows reader temporarily locks a JSON file.
 
             if pedestrian_risk is not None:
                 ttc = pedestrian_risk["ttc_s"]
