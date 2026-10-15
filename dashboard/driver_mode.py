@@ -272,10 +272,12 @@ class DriverModeRenderer:
     def _draw_context_roads(
         self, canvas: np.ndarray, road_context: Any
     ) -> bool:
-        """Draw sampled CARLA lanes, not guessed road templates.
+        """Render a single merged road surface from CARLA lane segments.
 
-        The sampler provides geometry in the same ego-relative coordinate
-        frame as the risk engine. This display must not affect control.
+        Painting each short waypoint segment with a thick outlined cv2.line
+        produces scalloped blobs at junctions. Rasterize flat-ended lane
+        polygons into one mask and outline the UNION instead. CARLA remains
+        the authoritative geometry source; this is presentation-only.
         """
         if not isinstance(road_context, dict):
             return False
@@ -285,11 +287,13 @@ class DriverModeRenderer:
         segments = road_context.get("segments")
         if not isinstance(segments, list) or not segments:
             return False
-        # Limit painting to the map interior. Road lines may extend beyond
-        # the visible window, so OpenCV handles their clipping within ROI.
+
         ox, oy, right, bottom = 54, 142, 800, 682
         layer = canvas[oy:bottom, ox:right]
-        drawable = []
+        height, width = layer.shape[:2]
+        mask = np.zeros((height, width), dtype=np.uint8)
+        count = 0
+
         for segment in segments[:400]:
             if not isinstance(segment, dict):
                 continue
@@ -300,31 +304,65 @@ class DriverModeRenderer:
                 a, b = points
                 lat_a, fwd_a = float(a[0]), float(a[1])
                 lat_b, fwd_b = float(b[0]), float(b[1])
-                width = float(segment.get("width_m", 3.5))
+                lane_width = float(segment.get("width_m", 3.5))
             except (ValueError, TypeError, IndexError, KeyError):
                 continue
-            if not all(math.isfinite(v) for v in (
-                    lat_a, fwd_a, lat_b, fwd_b, width)):
+            if not all(math.isfinite(value) for value in (
+                    lat_a, fwd_a, lat_b, fwd_b, lane_width)):
                 continue
-            if not 0.5 <= width <= 12.0:
+            if not 0.5 <= lane_width <= 12.0:
                 continue
+
             p0 = self._road_projection(lat_a, fwd_a)
             p1 = self._road_projection(lat_b, fwd_b)
-            start = (p0[0]-ox, p0[1]-oy)
-            end = (p1[0]-ox, p1[1]-oy)
-            thickness = max(8, min(110, int(round(width*10.0))))
-            drawable.append((start, end, thickness, bool(segment.get("junction"))))
-        if not drawable:
+            ax, ay = float(p0[0]-ox), float(p0[1]-oy)
+            bx, by = float(p1[0]-ox), float(p1[1]-oy)
+            vx, vy = bx-ax, by-ay
+            length = math.hypot(vx, vy)
+            if length < 0.75:
+                continue
+            ux, uy = vx/length, vy/length
+            nx, ny = -uy, ux
+
+            # Flat-ended strips have no per-waypoint circle caps. Extend
+            # endpoints slightly to bridge normal CARLA sampling gaps.
+            extension = min(5.0, length*0.18)
+            half = lane_width * 5.05
+            sx, sy = ax-ux*extension, ay-uy*extension
+            ex, ey = bx+ux*extension, by+uy*extension
+            quad = np.rint([
+                [sx+nx*half, sy+ny*half],
+                [sx-nx*half, sy-ny*half],
+                [ex-nx*half, ey-ny*half],
+                [ex+nx*half, ey+ny*half],
+            ]).astype(np.int32)
+            cv2.fillConvexPoly(mask, quad, 255, lineType=cv2.LINE_8)
+            count += 1
+
+        if not count or cv2.countNonZero(mask) == 0:
             return False
-        # Drawing from the entire neighborhood preserves junctions, bends
-        # and connecting branches. Two passes create tidy road shoulders.
-        for start, end, width, junction in drawable:
-            cv2.line(layer, start, end, (91, 83, 77),
-                     width+4, cv2.LINE_AA)
-        for start, end, width, junction in drawable:
-            cv2.line(layer, start, end,
-                     (52, 50, 52) if junction else (48, 47, 50),
-                     width, cv2.LINE_AA)
+
+        # Merge neighboring strips and soften jagged 3-m sampling joins.
+        mask = cv2.morphologyEx(
+            mask, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+        )
+        mask = cv2.GaussianBlur(mask, (7, 7), 1.7)
+        _, mask = cv2.threshold(mask, 112, 255, cv2.THRESH_BINARY)
+
+        # A single shoulder and surface for the union, not an outline
+        # around each of the hundreds of individual waypoint segments.
+        shoulder = cv2.dilate(
+            mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        )
+        layer[shoulder > 0] = (92, 84, 78)
+        layer[mask > 0] = (52, 50, 53)
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        cv2.drawContours(
+            layer, contours, -1, (105, 98, 94), 1, cv2.LINE_AA
+        )
         return True
 
     def _draw_detected_objects(
@@ -436,8 +474,14 @@ class DriverModeRenderer:
             else "EGO-RELATIVE ROAD SCHEMATIC",
             (55, 102), scale=0.37, color=MUTED, thickness=1,
         )
-        status_pill(canvas, "DATA STALE" if stale else "LIVE",
-                    (652, 76), foreground=CAUTION if stale else GREEN,
+        # Recorded layout previews must never claim they are live data.
+        pill_label = (
+            "DATA STALE" if stale
+            else "PREVIEW" if snapshot.get("_preview_recorded")
+            else "LIVE"
+        )
+        status_pill(canvas, pill_label,
+                    (652, 76), foreground=CAUTION if stale or snapshot.get("_preview_recorded") else GREEN,
                     fill=(47, 45, 46), border=(85, 73, 67),
                     scale=0.40, height=29)
         for meters in (10, 20, 30):
@@ -494,7 +538,8 @@ class DriverModeRenderer:
                  if primary else ("TARGET UNCONFIRMED" if level != "NORMAL"
                                   else "NO ACTIVE ALERT"))
         self._fit_text(canvas, klass, (875, 114), 347, 0.91,
-                       color if primary else (MUTED if stale else GREEN), 2)
+                       color if primary or level != "NORMAL"
+                       else (MUTED if stale else GREEN), 2)
         self._put_text(canvas, "DISTANCE", (875, 157),
                        scale=0.42, color=MUTED, thickness=1)
         self._put_text(canvas, "TIME TO COLLISION", (1054, 157),
