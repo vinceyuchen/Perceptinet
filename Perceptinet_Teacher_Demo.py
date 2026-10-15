@@ -251,6 +251,9 @@ def main(argv=None) -> int:
             env.pop("PERCEPTINET_VALIDATION_HEADLESS", None)
             env.pop("PERCEPTINET_VALIDATION_AUTO_EXIT", None)
             env["PERCEPTINET_TEACHER_DEMO"] = "1"
+            # Unique per-cycle artifacts avoid Windows Excel/file locks.
+            # The live dashboard continues watching results/dashboard_snapshot.json.
+            env["PERCEPTINET_DEMO_CYCLE_INDEX"] = str(rounds + 1)
             env["PERCEPTINET_DEMO_STOP_FILE"] = str(STOP_FILE)
             env["PERCEPTINET_DEMO_CYCLE_FILE"] = str(CYCLE_FILE)
             env["PERCEPTINET_DEMO_STOP_HOLD_SECONDS"] = str(args.hold_seconds)
