@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
+from .ui_theme import draw_text, rounded_rect
+
 
 HAZARD_COLORS = {
     "NORMAL": (210, 210, 210),
@@ -118,15 +120,13 @@ class DriverModeRenderer:
         color: Tuple[int, int, int] = WHITE,
         thickness: int = 2,
     ) -> None:
-        cv2.putText(
+        draw_text(
             canvas,
-            str(text),
+            text,
             xy,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            scale,
-            color,
-            thickness,
-            cv2.LINE_AA,
+            scale=scale,
+            color=color,
+            thickness=thickness,
         )
 
     @staticmethod
@@ -135,8 +135,15 @@ class DriverModeRenderer:
         p1: Tuple[int, int],
         p2: Tuple[int, int],
     ) -> None:
-        cv2.rectangle(canvas, p1, p2, PANEL, -1)
-        cv2.rectangle(canvas, p1, p2, (55, 55, 55), 1)
+        rounded_rect(
+            canvas,
+            p1,
+            p2,
+            fill=PANEL,
+            border=(52, 52, 52),
+            border_thickness=1,
+            radius=10,
+        )
 
     @staticmethod
     def read_snapshot(
@@ -192,16 +199,16 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "PERCEPTINET",
+            "DRIVER ASSIST",
             (30, 38),
-            scale=0.82,
+            scale=0.78,
             color=WHITE,
             thickness=2,
         )
 
         self._put_text(
             canvas,
-            "COOPERATIVE DRIVER ASSIST",
+            "COOPERATIVE PERCEPTION",
             (30, 66),
             scale=0.48,
             color=MUTED,
