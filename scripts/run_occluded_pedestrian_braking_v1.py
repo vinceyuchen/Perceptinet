@@ -31,6 +31,10 @@ from control.braking_controller import BrakingController, BrakingConfig
 EGO_TEST_SPEED_MPS = 4.0
 EGO_STOP_DISTANCE_M = 1.5
 
+# Once the Ego Vehicle is fully stopped, require a short run
+# of stable NORMAL observations before releasing the safety latch.
+HAZARD_RELEASE_NORMAL_FRAMES = 10
+
 
 
 # ============================================================
@@ -330,11 +334,15 @@ def main():
     # Cooperative braking hazard state.
     #
     # CAUTION is advisory and is never permanently latched.
-    # WARNING and CRITICAL are safety-relevant braking states
-    # and remain latched so that a one-frame perception dropout
-    # cannot suddenly release the brakes.
+    # WARNING and CRITICAL are safety-relevant braking states.
+    # They remain latched through the active braking event so a
+    # one-frame perception dropout cannot suddenly release braking.
+    # After the vehicle has stopped, a stable NORMAL window releases
+    # the latch and leaves the vehicle in a stopped/hold condition.
     latched_pedestrian_hazard = "NORMAL"
     last_observed_pedestrian_hazard = "NORMAL"
+    normal_release_frames = 0
+    braking_state = "DRIVING"
 
     hazard_priority = {
         "NORMAL": 0,
@@ -359,7 +367,7 @@ def main():
     )
     print(
         "Braking controller: "
-        "CAUTION=0.75, WARNING=2.0, CRITICAL=6.0 m/s^2"
+        "CAUTION=0.0, WARNING=0.5, CRITICAL=6.0 m/s^2"
     )
     print("World-coordinate association enabled\nV2I channel enabled")
 
@@ -1170,6 +1178,31 @@ def main():
                     observed_pedestrian_hazard
                 )
 
+            # Once stopped, keep the safety latch only until
+            # RiskEngine has reported NORMAL continuously for a
+            # short persistence window. This prevents endless
+            # CRITICAL braking commands after the vehicle is already
+            # stationary while still rejecting one-frame dropouts.
+            if braking_state == "STOPPED_HOLD":
+                if observed_pedestrian_hazard == "NORMAL":
+                    normal_release_frames += 1
+                else:
+                    normal_release_frames = 0
+
+                if (
+                    normal_release_frames
+                    >= HAZARD_RELEASE_NORMAL_FRAMES
+                    and latched_pedestrian_hazard != "NORMAL"
+                ):
+                    print(
+                        "HAZARD RELEASE | "
+                        f"{latched_pedestrian_hazard} -> NORMAL | "
+                        f"normal_frames={normal_release_frames}"
+                    )
+
+                    latched_pedestrian_hazard = "NORMAL"
+                    braking_state = "STOPPED_RELEASED"
+
             if (
                 hazard_priority[latched_pedestrian_hazard]
                 >= hazard_priority["WARNING"]
@@ -1250,7 +1283,10 @@ def main():
                     "BRAKE TRIGGERED | TTC=N/A"
                 )
 
-            if braking_command["braking_active"]:
+            if (
+                braking_command["braking_active"]
+                and not stop_reported
+            ):
                 stop_distance = braking_command[
                     "estimated_stopping_distance_m"
                 ]
@@ -1302,6 +1338,12 @@ def main():
                 )
 
                 stop_reported = True
+                braking_state = "STOPPED_HOLD"
+                normal_release_frames = 0
+
+                print(
+                    "BRAKING STATE | DRIVING -> STOPPED_HOLD"
+                )
 
             if pedestrian_risk is not None:
                 ttc = pedestrian_risk["ttc_s"]
