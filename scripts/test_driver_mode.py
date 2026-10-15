@@ -89,6 +89,13 @@ def main():
     assert frame.dtype.name == "uint8"
     assert frame.mean() > 0.0
 
+    # v6.8 is intentionally grayscale: no blue/green/orange pixels.
+    import numpy as np
+    assert np.array_equal(frame[:, :, 0], frame[:, :, 1])
+    assert np.array_equal(frame[:, :, 1], frame[:, :, 2])
+    assert frame[300, 80, 0] > 205  # Pale Road Map glass
+    assert frame[320, 1050, 0] > 205  # Pale right-side card
+
     critical = dict(snapshot)
     critical["hazard"] = dict(snapshot["hazard"])
     critical["hazard"]["control_level"] = "CRITICAL"
@@ -164,7 +171,6 @@ def main():
 
     # v6.5: only smoothed, fixed-width schematic road boundaries.
     # At a synthetic crossroad, the centre of both roads remains clear.
-    import numpy as np
     map_only = np.zeros((720, 1280, 3), dtype=np.uint8)
     assert renderer._draw_context_roads(
         map_only, road_context["road_context"]
@@ -211,7 +217,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
-    print("CARLA fixed-width schematic, wider FOV and recorded preview: OK")
+    print("v6.8 grayscale glass and CARLA road layout: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
