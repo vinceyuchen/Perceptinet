@@ -72,6 +72,17 @@ def main():
         height=720,
     )
 
+    # v6.6 is fixed, wider and strictly monotonic in the forward axis.
+    assert renderer._road_projection(0.0, 0.0) == (430, 616)
+    assert renderer._road_projection(-24.0, 0.0)[0] == 178
+    assert renderer._road_projection(24.0, 0.0)[0] == 682
+    assert renderer._road_projection(0.0, 50.0)[1] == 141
+    road_ys = [
+        renderer._road_projection(0.0, distance)[1]
+        for distance in (0.0, 10.0, 20.0, 30.0, 40.0, 50.0)
+    ]
+    assert all(first > second for first, second in zip(road_ys, road_ys[1:]))
+
     frame = renderer.render(snapshot)
 
     assert frame.shape == (720, 1280, 3)
@@ -161,16 +172,18 @@ def main():
     assert not np.any(map_only[488, 430])  # Intersection interior
     assert not np.any(map_only[488, 500])  # Cross street interior
     assert not np.any(map_only[488, 200])  # Outside street
-    assert np.any(map_only[335:349, 367:375])  # Main left boundary
-    assert np.any(map_only[335:349, 455:465])  # Main right boundary
-    assert np.any(map_only[437:450, 290:320])  # Cross-road boundary
+    assert np.any(map_only[257:286, 346:375])  # Left fixed-width edge
+    assert np.any(map_only[257:286, 455:481])  # Right fixed-width edge
+    assert np.any(map_only[390:417, 291:322])  # Cross-road edge
 
     # Fallback without CARLA data is also only two parallel road lines.
     fallback_only = np.zeros_like(map_only)
     renderer._draw_fallback_road(fallback_only)
     assert not np.any(fallback_only[390, 430])
-    assert np.any(fallback_only[390, 385])
-    assert np.any(fallback_only[390, 475])
+    left = renderer._road_projection(-5.4, 10.0)[0]
+    right = renderer._road_projection(5.4, 10.0)[0]
+    assert np.any(fallback_only[390, left])
+    assert np.any(fallback_only[390, right])
 
     # A saved frame can be viewed in normal colors but must say PREVIEW,
     # not LIVE, when explicitly marked as recorded.
@@ -198,7 +211,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
-    print("CARLA fixed-width road centerlines and recorded preview: OK")
+    print("CARLA fixed-width schematic, wider FOV and recorded preview: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
