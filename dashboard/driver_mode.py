@@ -229,24 +229,9 @@ class DriverModeRenderer:
                        (844, 254, 1260, 476),
                        (844, 491, 1260, 700)):
             self._glass_card(frame, bounds)
-        # Basemap-style accents are deliberately abstract, not map tiles.
-        for x, y, w, h in ((69, 197, 160, 123),
-                           (87, 374, 140, 173),
-                           (642, 202, 134, 172),
-                           (662, 433, 112, 152)):
-            rounded_rect(frame, (x, y), (x+w, y+h),
-                         fill=(33, 41, 40), radius=19)
-        rounded_rect(frame, (254, 146), (605, 658),
-                     fill=(49, 49, 51), radius=20)
-        rounded_rect(frame, (267, 149), (592, 655),
-                     fill=(45, 44, 46), radius=17)
-        for x in (280, 579):
-            cv2.line(frame, (x, 168), (x, 633),
-                     (125, 115, 105), 2, cv2.LINE_AA)
-        for y in range(205, 565, 66):
-            cv2.line(frame, (430, y), (430, y+31),
-                     (130, 115, 93), 3, cv2.LINE_AA)
-        cv2.line(frame, (430, 565), (430, 600), BLUE, 3, cv2.LINE_AA)
+        # Roads are rendered per snapshot from CARLA waypoints in
+        # _draw_road; no fixed geometry is baked into the glass background.
+
         return frame
 
     @staticmethod
@@ -266,85 +251,230 @@ class DriverModeRenderer:
         self._put_text(canvas, text, xy, scale=scale,
                        color=color, thickness=thickness)
 
+    def _road_projection(self, lateral: float, forward: float) -> Tuple[int, int]:
+        """Ego-relative [lateral, forward] metres -> Road View pixel."""
+        return (int(round(430 + lateral * 10.0)),
+                int(round(590 - forward * 10.2)))
+
+    def _draw_fallback_road(self, canvas: np.ndarray) -> None:
+        """Only used when real CARLA map geometry is unavailable."""
+        rounded_rect(
+            canvas, (258, 146), (603, 668),
+            fill=(39, 40, 45), radius=18,
+        )
+        for side_x in (278, 582):
+            cv2.line(canvas, (side_x, 155), (side_x, 654),
+                     (91, 91, 97), 2, cv2.LINE_AA)
+        for y in range(192, 555, 55):
+            cv2.line(canvas, (430, y), (430, y+27),
+                     (99, 115, 125), 2, cv2.LINE_AA)
+
+    def _draw_context_roads(
+        self, canvas: np.ndarray, road_context: Any
+    ) -> bool:
+        """Draw sampled CARLA lanes, not guessed road templates.
+
+        The sampler provides geometry in the same ego-relative coordinate
+        frame as the risk engine. This display must not affect control.
+        """
+        if not isinstance(road_context, dict):
+            return False
+        if (road_context.get("coordinate_frame")
+                != "ego_relative_lateral_forward_m"):
+            return False
+        segments = road_context.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return False
+        # Limit painting to the map interior. Road lines may extend beyond
+        # the visible window, so OpenCV handles their clipping within ROI.
+        ox, oy, right, bottom = 54, 142, 800, 682
+        layer = canvas[oy:bottom, ox:right]
+        drawable = []
+        for segment in segments[:400]:
+            if not isinstance(segment, dict):
+                continue
+            points = segment.get("points")
+            if not isinstance(points, list) or len(points) != 2:
+                continue
+            try:
+                a, b = points
+                lat_a, fwd_a = float(a[0]), float(a[1])
+                lat_b, fwd_b = float(b[0]), float(b[1])
+                width = float(segment.get("width_m", 3.5))
+            except (ValueError, TypeError, IndexError, KeyError):
+                continue
+            if not all(math.isfinite(v) for v in (
+                    lat_a, fwd_a, lat_b, fwd_b, width)):
+                continue
+            if not 0.5 <= width <= 12.0:
+                continue
+            p0 = self._road_projection(lat_a, fwd_a)
+            p1 = self._road_projection(lat_b, fwd_b)
+            start = (p0[0]-ox, p0[1]-oy)
+            end = (p1[0]-ox, p1[1]-oy)
+            thickness = max(8, min(110, int(round(width*10.0))))
+            drawable.append((start, end, thickness, bool(segment.get("junction"))))
+        if not drawable:
+            return False
+        # Drawing from the entire neighborhood preserves junctions, bends
+        # and connecting branches. Two passes create tidy road shoulders.
+        for start, end, width, junction in drawable:
+            cv2.line(layer, start, end, (91, 83, 77),
+                     width+4, cv2.LINE_AA)
+        for start, end, width, junction in drawable:
+            cv2.line(layer, start, end,
+                     (52, 50, 52) if junction else (48, 47, 50),
+                     width, cv2.LINE_AA)
+        return True
+
+    def _draw_detected_objects(
+        self, canvas: np.ndarray, snapshot: Dict[str, Any],
+        *, stale: bool, active_primary: Optional[Dict[str, Any]]
+    ) -> int:
+        """Show roadside/tracked road users, excluding ego-overlap detections.
+
+        Use display coordinates only for presentation. Do not alter
+        fused tracks, hazard assessment, or CARLA actors.
+        """
+        ego = snapshot.get("ego") or {}
+        position = ego.get("world_position") or {}
+        ex, ey = self._finite(position.get("x")), self._finite(position.get("y"))
+        yaw = self._finite(ego.get("yaw_deg"))
+        if ex is None or ey is None or yaw is None:
+            return 0
+        radians = math.radians(yaw)
+        co, si = math.cos(radians), math.sin(radians)
+        primary_id = active_primary.get("actor_id") if active_primary else None
+        objects = (snapshot.get("fusion") or {}).get("objects") or []
+        candidates = []
+        for obj in objects:
+            if not isinstance(obj, dict):
+                continue
+            loc = obj.get("display_world_position") or obj.get("world_position") or {}
+            if not isinstance(loc, dict):
+                continue
+            wx, wy = self._finite(loc.get("x")), self._finite(loc.get("y"))
+            if wx is None or wy is None:
+                continue
+            dx, dy = wx-ex, wy-ey
+            if math.hypot(dx, dy) < 1.2:
+                # An apparent car at the exact ego pose may be self-detection.
+                # Exclude it from the *map drawing only*, not from raw data.
+                continue
+            forward, lateral = dx*co + dy*si, -dx*si + dy*co
+            if not (-6 <= forward <= 40 and abs(lateral) <= 18):
+                continue
+            class_name = str(obj.get("class_name") or "OBJECT").upper()
+            if class_name not in {"PEDESTRIAN", "CAR", "TRUCK", "BUS",
+                                  "MOTORCYCLE", "BICYCLE"}:
+                continue
+            is_primary = bool(active_primary and obj.get("actor_id") == primary_id)
+            candidates.append((is_primary, forward, lateral, class_name, obj))
+        candidates.sort(key=lambda item: (item[0], -item[1]))
+        count = 0
+        for is_primary, forward, lateral, klass, obj in candidates[:10]:
+            px, py = self._road_projection(lateral, forward)
+            if not (70 <= px <= 782 and 172 <= py <= 659):
+                continue
+            level = str((snapshot.get("hazard") or {}).get(
+                "control_level", "NORMAL")).upper()
+            color = (MUTED if stale else
+                     self._hazard_color(level) if is_primary
+                     else BLUE if klass == "PEDESTRIAN" else (147, 153, 164))
+            draw_object_marker(canvas, (px, py), klass,
+                               color=color, size=18 if is_primary else 13,
+                               primary=is_primary)
+            (tw, _), _ = cv2.getTextSize(
+                klass, cv2.FONT_HERSHEY_DUPLEX, 0.43, 1)
+            tx = px+23 if px+23+tw < 778 else px-tw-25
+            ty = min(635, max(192, py-7))
+            self._fit_text(canvas, klass, (tx, ty), 145,
+                           0.43, color, 1)
+            if is_primary:
+                sources = obj.get("display_sources") or obj.get("sources") or []
+                if sources:
+                    self._fit_text(canvas, str(sources[0]).upper(),
+                                   (tx, ty+18), 145, 0.34,
+                                   MUTED if stale else BLUE, 1)
+            count += 1
+        return count
+
     def _draw_road(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                    stale: bool) -> None:
+        road_context = snapshot.get("road_context")
+        map_available = self._draw_context_roads(canvas, road_context)
+        if not map_available:
+            self._draw_fallback_road(canvas)
         self._put_text(canvas, "ROAD AHEAD", (54, 73),
                        scale=0.87, color=WHITE, thickness=2)
-        self._put_text(canvas, "TOP-DOWN / EGO-RELATIVE SCHEMATIC",
-                       (55, 102), scale=0.37, color=MUTED, thickness=1)
+        self._put_text(
+            canvas,
+            "CARLA WAYPOINT ROAD VIEW" if map_available
+            else "EGO-RELATIVE ROAD SCHEMATIC",
+            (55, 102), scale=0.37, color=MUTED, thickness=1,
+        )
         status_pill(canvas, "DATA STALE" if stale else "LIVE",
                     (652, 76), foreground=CAUTION if stale else GREEN,
                     fill=(47, 45, 46), border=(85, 73, 67),
                     scale=0.40, height=29)
-        cx, ego_y, span = 430, 591, 400
         for meters in (10, 20, 30):
-            y = int(ego_y - meters/30.0*span)
-            cv2.line(canvas, (283, y), (577, y),
-                     (65, 64, 67), 1, cv2.LINE_AA)
-            self._put_text(canvas, f"{meters} m", (171, y+6),
-                           scale=0.40, color=MUTED, thickness=1)
+            x, y = self._road_projection(0.0, float(meters))
+            self._put_text(canvas, f"{meters} m", (119, y+5),
+                           scale=0.38, color=MUTED, thickness=1)
+        cx, ego_y = self._road_projection(0.0, 0.0)
         draw_navigation_marker(canvas, (cx, ego_y), size=24,
                                color=MUTED if stale else WHITE,
                                heading_deg=0.0, halo=True)
-        self._put_text(canvas, "EGO", (412, 641),
+        self._put_text(canvas, "EGO", (413, ego_y+45),
                        scale=0.39, color=MUTED, thickness=1)
 
         hazard = snapshot.get("hazard") or {}
-        primary = hazard.get("primary") or None
-        if not primary:
-            self._put_text(canvas, "LAST KNOWN VIEW" if stale else "ROAD CLEAR",
-                           (634, 631), scale=0.46,
-                           color=MUTED if stale else GREEN, thickness=1)
-            return
-        forward = self._finite(primary.get("longitudinal_m"))
-        lateral = self._finite(primary.get("lateral_m"))
-        if forward is None or lateral is None:
-            self._put_text(canvas, "POSITION UNAVAILABLE", (553, 630),
-                           scale=0.43, color=MUTED, thickness=1)
-            return
-        if not (0 <= forward <= 30 and -4 <= lateral <= 4):
-            self._put_text(canvas, "TARGET OUTSIDE VIEW", (552, 630),
-                           scale=0.43, color=MUTED, thickness=1)
-            return
-        px = int(cx+lateral/4.0*138)
-        py = int(ego_y-forward/30.0*span)
         level = str(hazard.get("control_level", "NORMAL")).upper()
-        color = MUTED if stale else self._hazard_color(level)
-        klass = str(primary.get("class_name") or "OBJECT").upper()
-        # Glow is local to the target to avoid frame-sized allocations.
-        glow = canvas[max(0, py-37):py+38, max(0, px-37):px+38].copy()
-        if glow.size:
-            gx, gy = min(37, px), min(37, py)
-            tinted = glow.copy()
-            cv2.circle(tinted, (gx, gy), 31, color, -1, cv2.LINE_AA)
-            cv2.addWeighted(tinted, 0.13, glow, 0.87, 0, dst=glow)
-            canvas[max(0, py-37):py+38, max(0, px-37):px+38] = glow
-        draw_object_marker(canvas, (px, py), klass,
-                           color=color, size=20, primary=True)
-        (tw, _), _ = cv2.getTextSize(
-            klass, cv2.FONT_HERSHEY_DUPLEX, 0.52, 2)
-        tx = px+37 if px+37+tw <= 794 else px-tw-37
-        tx = max(56, tx)
-        ty = max(192, min(606, py+5))
-        self._fit_text(canvas, klass, (tx, ty), 178, 0.52, color, 2)
-        sources = primary.get("sources") or []
-        if sources:
-            self._fit_text(canvas, str(sources[0]).upper(),
-                           (tx, ty+22), 170, 0.38,
-                           MUTED if stale else BLUE, 1)
+        active_primary = (
+            hazard.get("primary") if level in ("CAUTION", "WARNING", "CRITICAL")
+            else None
+        )
+        drawn_count = self._draw_detected_objects(
+            canvas, snapshot, stale=stale, active_primary=active_primary
+        )
+        if drawn_count:
+            return
+
+        # Older snapshots may omit fused objects. Draw only a genuine
+        # non-NORMAL primary risk using its existing ego-relative coordinates.
+        if active_primary:
+            forward = self._finite(active_primary.get("longitudinal_m"))
+            lateral = self._finite(active_primary.get("lateral_m"))
+            if (forward is not None and lateral is not None
+                    and -6 <= forward <= 40 and abs(lateral) <= 18):
+                px, py = self._road_projection(lateral, forward)
+                color = MUTED if stale else self._hazard_color(level)
+                klass = str(active_primary.get("class_name") or "OBJECT").upper()
+                draw_object_marker(canvas, (px, py), klass,
+                                   color=color, size=19, primary=True)
+                self._fit_text(canvas, klass, (px+28, py-7), 155,
+                               0.45, color, 1)
+                return
+        self._put_text(canvas, "NO RECENT TRACKS" if stale else "NO TRACKED OBJECTS",
+                       (583, 651), scale=0.36, color=MUTED, thickness=1)
 
     def _draw_hazard(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                      stale: bool) -> None:
         hazard = snapshot.get("hazard") or {}
-        primary = hazard.get("primary") or None
         level = str(hazard.get("control_level", "NORMAL")).upper()
+        # Avoid showing the first NORMAL risk as an active danger:
+        # the data layer may pick an ego-overlap car in a NORMAL-only run.
+        primary = (
+            hazard.get("primary") if level in ("CAUTION", "WARNING", "CRITICAL")
+            else None
+        )
         color = MUTED if stale else self._hazard_color(level)
         self._put_text(canvas, "HAZARD", (875, 58),
                        scale=0.52, color=MUTED, thickness=1)
         self._fit_text(canvas, "LAST KNOWN" if stale else level,
                        (1098, 58), 134, 0.43, color, 2)
         klass = (str(primary.get("class_name") or "OBJECT").upper()
-                 if primary else "ROAD CLEAR")
+                 if primary else "NO ACTIVE ALERT")
         self._fit_text(canvas, klass, (875, 114), 347, 0.91,
                        color if primary else (MUTED if stale else GREEN), 2)
         self._put_text(canvas, "DISTANCE", (875, 157),
