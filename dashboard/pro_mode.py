@@ -320,7 +320,7 @@ class ProModeRenderer:
             (1325, 14),
             (1574, 64),
             fill=SURFACE_3,
-            border=color,
+            border=MUTED if stale else color,
             border_thickness=1,
             radius=9,
         )
@@ -328,15 +328,15 @@ class ProModeRenderer:
             canvas,
             (1325, 24),
             (1331, 54),
-            color,
+            MUTED if stale else color,
             -1,
         )
         self._put_text(
             canvas,
-            level,
+            f"{level} / LAST KNOWN" if stale else level,
             (1350, 48),
-            scale=0.70,
-            color=color,
+            scale=0.55 if stale else 0.70,
+            color=MUTED if stale else color,
             thickness=2,
         )
 
@@ -533,27 +533,27 @@ class ProModeRenderer:
     ) -> Tuple[int, int]:
         label_size, _ = cv2.getTextSize(
             label,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.38,
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.46,
             1,
         )
         source_size, _ = cv2.getTextSize(
             sources,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.30,
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.37,
             1,
         )
 
         width = max(label_size[0], source_size[0]) + 10
-        height = 32
+        height = 39
 
         candidates = [
             (px + 15, py - 8),
-            (px + 15, py + 30),
+            (px + 15, py + 35),
             (px - width - 15, py - 8),
-            (px - width - 15, py + 30),
-            (px + 15, py - 34),
-            (px - width - 15, py - 34),
+            (px - width - 15, py + 35),
+            (px + 15, py - 38),
+            (px - width - 15, py - 38),
         ]
 
         for tx, ty in candidates:
@@ -562,9 +562,9 @@ class ProModeRenderer:
 
             rect = (
                 tx - 4,
-                ty - 20,
+                ty - 22,
                 tx + width,
-                ty + 12,
+                ty + 20,
             )
 
             overlaps = any(
@@ -583,13 +583,15 @@ class ProModeRenderer:
 
         tx = max(plot_left + 4, min(px + 15, plot_right - width - 4))
         ty = max(plot_top + height, min(py - 8, plot_bottom - 4))
-        occupied.append((tx - 4, ty - 20, tx + width, ty + 12))
+        occupied.append((tx - 4, ty - 22, tx + width, ty + 20))
         return tx, ty
 
     def _draw_fused_world(
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         x1, y1, x2, y2 = 20, 102, 1030, 690
         self._panel(canvas, (x1, y1), (x2, y2))
@@ -603,7 +605,7 @@ class ProModeRenderer:
 
         self._put_text(
             canvas,
-            "FUSED WORLD MODEL",
+            "LAST KNOWN FUSED WORLD" if stale else "FUSED WORLD MODEL",
             (45, 137),
             scale=0.62,
             thickness=2,
@@ -622,7 +624,7 @@ class ProModeRenderer:
                 f"+/-{lateral_half:.0f} m"
             ),
             (45, 165),
-            scale=0.42,
+            scale=0.46,
             color=MUTED,
         )
 
@@ -688,7 +690,7 @@ class ProModeRenderer:
             canvas,
             (center_x, ego_marker_y),
             size=13,
-            color=WHITE,
+            color=MUTED if stale else WHITE,
             heading_deg=0.0,
             halo=True,
         )
@@ -776,10 +778,12 @@ class ProModeRenderer:
             obj,
             is_primary,
         ) in points:
-            color = self._object_color(
-                obj,
-                is_primary=is_primary,
-                hazard_level=hazard_level,
+            color = (
+                MUTED if stale else self._object_color(
+                    obj,
+                    is_primary=is_primary,
+                    hazard_level=hazard_level,
+                )
             )
             class_name = str(
                 obj.get("class_name") or "object"
@@ -827,14 +831,14 @@ class ProModeRenderer:
                 canvas,
                 label,
                 (tx, ty),
-                scale=0.38,
+                scale=0.46,
                 color=color,
             )
             self._put_text(
                 canvas,
                 sources,
                 (tx, ty + 15),
-                scale=0.30,
+                scale=0.37,
                 color=MUTED,
             )
 
@@ -908,19 +912,29 @@ class ProModeRenderer:
                     radius=7,
                 )
 
-            prefix = ">" if selected else " "
-            text = f"{prefix} {source:<10} {count} object{'s' if count != 1 else ''}"
+            # Align source and counts as separate proportional-font columns.
+            if selected:
+                cv2.line(
+                    canvas, (1076, y - 14), (1076, y + 3),
+                    BLUE, 3, cv2.LINE_AA,
+                )
 
             self._put_text(
-                canvas,
-                text,
-                (1080, y),
-                scale=0.46,
+                canvas, str(source), (1090, y),
+                scale=0.47,
                 color=BLUE if selected else WHITE,
                 thickness=2 if selected else 1,
             )
+            self._put_text(
+                canvas,
+                f"{count} object{'s' if count != 1 else ''}",
+                (1220, y),
+                scale=0.41,
+                color=WHITE if selected else MUTED,
+                thickness=1,
+            )
 
-            badge_x = 1315
+            badge_x = 1345
 
             if source == first_source:
                 rect = badge(
@@ -929,7 +943,7 @@ class ProModeRenderer:
                     (badge_x, y),
                     fill=AMBER,
                     foreground=(24, 24, 26),
-                    scale=0.29,
+                    scale=0.27,
                 )
                 badge_x = rect[2] + 7
 
@@ -940,16 +954,16 @@ class ProModeRenderer:
                     (badge_x, y),
                     fill=BLUE,
                     foreground=(24, 24, 26),
-                    scale=0.29,
+                    scale=0.27,
                 )
 
             y += 32
 
         self._put_text(
             canvas,
-            "TAB: cycle source filter",
+            "TAB  /  CYCLE SOURCE FILTER",
             (1080, 292),
-            scale=0.38,
+            scale=0.40,
             color=MUTED,
         )
 
@@ -957,13 +971,15 @@ class ProModeRenderer:
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         x1, y1, x2, y2 = 1050, 332, 1580, 550
         self._panel(canvas, (x1, y1), (x2, y2))
 
         self._put_text(
             canvas,
-            "LIVE PIPELINE LATENCY",
+            "LAST KNOWN PIPELINE LATENCY" if stale else "LIVE PIPELINE LATENCY",
             (1075, 366),
             scale=0.58,
             thickness=2,
@@ -996,29 +1012,31 @@ class ProModeRenderer:
                     1,
                 )
 
+            is_total = key == "end_to_end_latency_ms"
             self._put_text(
-                canvas,
-                label,
-                (1080, y),
-                scale=0.42,
-                color=WHITE if key == "end_to_end_latency_ms" else MUTED,
-                thickness=2 if key == "end_to_end_latency_ms" else 1,
+                canvas, label, (1080, y),
+                scale=0.44,
+                color=WHITE if is_total else MUTED,
+                thickness=2 if is_total else 1,
+            )
+            value_scale = 0.47 if is_total else 0.45
+            value_weight = 2 if is_total else 1
+            (value_width, _), _ = cv2.getTextSize(
+                value_text, cv2.FONT_HERSHEY_DUPLEX,
+                value_scale, value_weight,
             )
             self._put_text(
-                canvas,
-                value_text,
-                (1415, y),
-                scale=0.45,
+                canvas, value_text, (1550 - value_width, y),
+                scale=value_scale,
                 color=(
-                    BLUE
-                    if key == "end_to_end_latency_ms"
-                    else AMBER
-                    if value is not None
-                    and key == "v2i_latency_ms"
-                    and value > 50.0
+                    MUTED if stale else
+                    BLUE if is_total else
+                    AMBER if (value is not None
+                              and key == "v2i_latency_ms"
+                              and value > 50.0)
                     else WHITE
                 ),
-                thickness=2 if key == "end_to_end_latency_ms" else 1,
+                thickness=value_weight,
             )
             y += 22
 
@@ -1255,15 +1273,23 @@ class ProModeRenderer:
                 cv2.LINE_AA,
             )
 
+            label_scale = 0.40
+            (label_width, _), _ = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_DUPLEX,
+                label_scale, 2 if complete else 1,
+            )
             self._put_text(
-                canvas,
-                label,
-                (x - 48, 775),
-                scale=0.34,
+                canvas, label,
+                (x - label_width // 2, 775),
+                scale=label_scale,
                 color=node_color,
                 thickness=2 if complete else 1,
             )
 
+        cv2.line(
+            canvas, (45, 832), (1555, 832),
+            BORDER_SOFT, 1, cv2.LINE_AA,
+        )
         latest = events[-1] if events else None
 
         if latest is not None:
@@ -1289,16 +1315,16 @@ class ProModeRenderer:
             self._put_text(
                 canvas,
                 latest_text,
-                (45, 856),
-                scale=0.39,
+                (45, 860),
+                scale=0.43,
                 color=MUTED,
             )
         else:
             self._put_text(
                 canvas,
                 "Waiting for significant cooperative perception events",
-                (45, 856),
-                scale=0.39,
+                (45, 860),
+                scale=0.43,
                 color=MUTED,
             )
 
@@ -1315,9 +1341,9 @@ class ProModeRenderer:
         )
 
         self._draw_header(canvas, snapshot, stale=stale)
-        self._draw_fused_world(canvas, snapshot)
+        self._draw_fused_world(canvas, snapshot, stale=stale)
         self._draw_source_inspector(canvas, snapshot)
-        self._draw_latency(canvas, snapshot)
+        self._draw_latency(canvas, snapshot, stale=stale)
         self._draw_state(canvas, snapshot)
         self._draw_timeline(canvas, snapshot)
 
