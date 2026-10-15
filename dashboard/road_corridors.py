@@ -228,8 +228,8 @@ def draw_road_corridors(
             [(project(lat, fwd)[0] - x0, project(lat, fwd)[1] - y0)
              for lat, fwd in points], dtype=np.int32
         )
-        cv2.polylines(layer, [coords], False, (138, 138, 138), 4, cv2.LINE_AA)
-        cv2.polylines(layer, [coords], False, (70, 70, 70), 1, cv2.LINE_AA)
+        cv2.polylines(layer, [coords], False, (102, 102, 102), 4, cv2.LINE_AA)
+        cv2.polylines(layer, [coords], False, (223, 223, 223), 1, cv2.LINE_AA)
         count += len(points) - 1
 
     for direction, profile in profiles.items():
@@ -323,7 +323,7 @@ def draw_road_corridors(
             (1 - t) ** 2 * p0 + 2 * (1 - t) * t * control + t ** 2 * p2
             for t in np.linspace(0.0, 1.0, 17)
         ], dtype=np.int32)
-        cv2.polylines(layer, [arc], False, (138, 138, 138), 4, cv2.LINE_AA)
-        cv2.polylines(layer, [arc], False, (70, 70, 70), 1, cv2.LINE_AA)
+        cv2.polylines(layer, [arc], False, (102, 102, 102), 4, cv2.LINE_AA)
+        cv2.polylines(layer, [arc], False, (223, 223, 223), 1, cv2.LINE_AA)
         used.update((i, j))
     return count > 0
