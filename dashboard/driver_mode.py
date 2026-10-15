@@ -62,6 +62,7 @@ class DriverModeRenderer:
     ):
         self.width = int(width)
         self.height = int(height)
+        self._base_canvas = self._make_base()
 
     @staticmethod
     def _number(
@@ -183,717 +184,244 @@ class DriverModeRenderer:
 
         raise RuntimeError("Unable to read dashboard snapshot")
 
-    def _draw_header(
-        self,
-        canvas: np.ndarray,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool,
-    ) -> None:
+
+    @staticmethod
+    def _glass_mask(w: int, h: int, radius: int = 26) -> np.ndarray:
+        mask = np.zeros((h, w), np.uint8)
+        r = min(radius, w // 2, h // 2)
+        cv2.rectangle(mask, (r, 0), (w-r-1, h-1), 255, -1)
+        cv2.rectangle(mask, (0, r), (w-1, h-r-1), 255, -1)
+        for cx, cy in ((r, r), (w-r-1, r), (r, h-r-1), (w-r-1, h-r-1)):
+            cv2.circle(mask, (cx, cy), r, 255, -1)
+        return mask
+
+    def _glass_card(self, canvas: np.ndarray, box: Tuple[int, int, int, int],
+                    road: bool = False) -> None:
+        """Cached translucent gradient over a blurred backdrop."""
+        x1, y1, x2, y2 = box
+        w, h = x2-x1, y2-y1
+        roi = canvas[y1:y2, x1:x2]
+        blur = cv2.GaussianBlur(roi, (0, 0), 11)
+        top = np.array((48, 39, 33) if road else (62, 45, 34), np.float32)
+        bot = np.array((30, 27, 26) if road else (43, 34, 29), np.float32)
+        t = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
+        tint = top[None, None, :]*(1-t)+bot[None, None, :]*t
+        fill = np.clip(blur.astype(np.float32)*0.31+tint*0.69, 0, 255).astype(np.uint8)
+        mask = self._glass_mask(w, h)
+        roi[mask > 0] = fill[mask > 0]
+        inner = cv2.erode(mask, np.ones((3, 3), np.uint8))
+        rim = cv2.subtract(mask, inner)
+        roi[rim > 0] = (83, 73, 65)
+        cv2.line(canvas, (x1+30, y1+3), (x2-30, y1+3),
+                 (101, 89, 75), 1, cv2.LINE_AA)
+
+    def _make_base(self) -> np.ndarray:
+        """Four frosted-glass regions rendered once per instance."""
+        yy, xx = np.mgrid[:720, :1280].astype(np.float32)
+        glow = np.exp(-((xx-210)/650)**2 - ((yy-75)/500)**2)
+        glow2 = np.exp(-((xx-1120)/600)**2 - ((yy-800)/500)**2)
+        frame = np.empty((720, 1280, 3), np.uint8)
+        frame[:, :, 0] = np.clip(18+16*glow+13*glow2, 0, 255)
+        frame[:, :, 1] = np.clip(16+11*glow+6*glow2, 0, 255)
+        frame[:, :, 2] = np.clip(15+6*glow+5*glow2, 0, 255)
+        self._glass_card(frame, (20, 20, 824, 700), road=True)
+        for bounds in ((844, 20, 1260, 239),
+                       (844, 254, 1260, 476),
+                       (844, 491, 1260, 700)):
+            self._glass_card(frame, bounds)
+        # Basemap-style accents are deliberately abstract, not map tiles.
+        for x, y, w, h in ((69, 197, 160, 123),
+                           (87, 374, 140, 173),
+                           (642, 202, 134, 172),
+                           (662, 433, 112, 152)):
+            rounded_rect(frame, (x, y), (x+w, y+h),
+                         fill=(33, 41, 40), radius=19)
+        rounded_rect(frame, (254, 146), (605, 658),
+                     fill=(49, 49, 51), radius=20)
+        rounded_rect(frame, (267, 149), (592, 655),
+                     fill=(45, 44, 46), radius=17)
+        for x in (280, 579):
+            cv2.line(frame, (x, 168), (x, 633),
+                     (125, 115, 105), 2, cv2.LINE_AA)
+        for y in range(205, 565, 66):
+            cv2.line(frame, (430, y), (430, y+31),
+                     (130, 115, 93), 3, cv2.LINE_AA)
+        cv2.line(frame, (430, 565), (430, 600), BLUE, 3, cv2.LINE_AA)
+        return frame
+
+    @staticmethod
+    def _finite(value: Any) -> Optional[float]:
+        number = DriverModeRenderer._number(value)
+        return number if number is not None and math.isfinite(number) else None
+
+    def _fit_text(self, canvas: np.ndarray, text: str, xy: Tuple[int, int],
+                  max_width: int, scale: float = 0.65,
+                  color: Tuple[int, int, int] = WHITE,
+                  thickness: int = 2) -> None:
+        text = str(text)
+        (tw, _), _ = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_DUPLEX, scale, thickness)
+        if tw > max_width:
+            scale = max(0.30, scale*max_width/tw)
+        self._put_text(canvas, text, xy, scale=scale,
+                       color=color, thickness=thickness)
+
+    def _draw_road(self, canvas: np.ndarray, snapshot: Dict[str, Any],
+                   stale: bool) -> None:
+        self._put_text(canvas, "ROAD AHEAD", (54, 73),
+                       scale=0.87, color=WHITE, thickness=2)
+        self._put_text(canvas, "TOP-DOWN / EGO-RELATIVE SCHEMATIC",
+                       (55, 102), scale=0.37, color=MUTED, thickness=1)
+        status_pill(canvas, "DATA STALE" if stale else "LIVE",
+                    (652, 76), foreground=CAUTION if stale else GREEN,
+                    fill=(47, 45, 46), border=(85, 73, 67),
+                    scale=0.40, height=29)
+        cx, ego_y, span = 430, 591, 400
+        for meters in (10, 20, 30):
+            y = int(ego_y - meters/30.0*span)
+            cv2.line(canvas, (283, y), (577, y),
+                     (65, 64, 67), 1, cv2.LINE_AA)
+            self._put_text(canvas, f"{meters} m", (171, y+6),
+                           scale=0.40, color=MUTED, thickness=1)
+        draw_navigation_marker(canvas, (cx, ego_y), size=24,
+                               color=MUTED if stale else WHITE,
+                               heading_deg=0.0, halo=True)
+        self._put_text(canvas, "EGO", (412, 641),
+                       scale=0.39, color=MUTED, thickness=1)
+
         hazard = snapshot.get("hazard") or {}
-        level = str(
-            hazard.get("control_level", "NORMAL")
-        ).upper()
-        color = self._hazard_color(level)
-
-        cv2.rectangle(
-            canvas,
-            (0, 0),
-            (self.width, 86),
-            PANEL,
-            -1,
-        )
-
-        self._put_text(
-            canvas,
-            "DRIVER MODE",
-            (30, 55),
-            scale=0.78,
-            color=WHITE,
-            thickness=2,
-        )
-
-        presentation = derive_presentation_state(
-            snapshot,
-            stale=stale,
-        )
-
-        status_text = str(
-            presentation["data_status"]
-        )
-
-        status_color = GREEN if not stale else CAUTION
-
-        status_pill(
-            canvas,
-            status_text,
-            (785, 56),
-            foreground=status_color,
-            fill=SURFACE_2,
-            border=BORDER_SOFT,
-            scale=0.40,
-            height=26,
-            dot=True,
-        )
-
-        rounded_rect(
-            canvas,
-            (950, 23),
-            (1245, 72),
-            fill=SURFACE_3,
-            border=MUTED if stale else color,
-            border_thickness=1,
-            radius=8,
-        )
-        cv2.rectangle(
-            canvas,
-            (950, 32),
-            (955, 64),
-            MUTED if stale else color,
-            -1,
-        )
-
-        self._put_text(
-            canvas,
-            f"{level} / LAST KNOWN" if stale else level,
-            (975, 55),
-            scale=0.54,
-            color=MUTED if stale else color,
-            thickness=2,
-        )
-
-    def _draw_speed(
-        self,
-        canvas: np.ndarray,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool = False,
-    ) -> None:
-        ego = snapshot.get("ego") or {}
-        speed_mps = self._number(
-            ego.get("speed_mps"),
-            0.0,
-        ) or 0.0
-
-        speed_kmh = speed_mps * 3.6
-        speed_text = f"{speed_kmh:.0f}"
-        speed_scale = 2.12 if len(speed_text) <= 2 else 1.72
-        (speed_width, _), _ = cv2.getTextSize(
-            speed_text, cv2.FONT_HERSHEY_DUPLEX, speed_scale, 4
-        )
-        speed_x = max(55, 207 - speed_width)
-
-        self._panel(
-            canvas,
-            (30, 115),
-            (310, 300),
-        )
-
-        self._put_text(
-            canvas,
-            "LAST KNOWN SPEED" if stale else "CURRENT SPEED",
-            (55, 150),
-            scale=0.55,
-            color=MUTED,
-            thickness=1,
-        )
-
-        self._put_text(
-            canvas,
-            speed_text,
-            (speed_x, 242),
-            scale=speed_scale,
-            color=MUTED if stale else WHITE,
-            thickness=4,
-        )
-
-        self._put_text(
-            canvas,
-            "km/h",
-            (219, 242),
-            scale=0.58,
-            color=MUTED,
-            thickness=1,
-        )
-
-    def _draw_hazard_card(
-        self,
-        canvas: np.ndarray,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool = False,
-    ) -> None:
-        hazard = snapshot.get("hazard") or {}
-        primary = hazard.get("primary")
-        level = str(
-            hazard.get("control_level", "NORMAL")
-        ).upper()
-        color = self._hazard_color(level)
-
-        self._panel(
-            canvas,
-            (30, 325),
-            (310, 625),
-        )
-
-        self._put_text(
-            canvas,
-            "LAST KNOWN HAZARD" if stale else "CURRENT HAZARD",
-            (55, 365),
-            scale=0.55,
-            color=MUTED,
-            thickness=1,
-        )
-
+        primary = hazard.get("primary") or None
         if not primary:
-            self._put_text(
-                canvas,
-                "NO RECENT DATA" if stale else "ROAD CLEAR",
-                (55, 425),
-                scale=0.9,
-                color=MUTED if stale else GREEN,
-                thickness=2,
-            )
+            self._put_text(canvas, "LAST KNOWN VIEW" if stale else "ROAD CLEAR",
+                           (634, 631), scale=0.46,
+                           color=MUTED if stale else GREEN, thickness=1)
             return
-
-        class_name = str(
-            primary.get("class_name") or "object"
-        ).upper()
-
-        distance_m = self._number(
-            primary.get("distance_m")
-        )
-
-        ttc_s = self._number(
-            primary.get("ttc_s")
-        )
-
-        sources = list(primary.get("sources") or [])
-        cooperative = any(
-            str(source).upper().startswith("RSU")
-            for source in sources
-        )
-
-        self._put_text(
-            canvas,
-            class_name,
-            (55, 420),
-            scale=0.86,
-            color=MUTED if stale else color,
-            thickness=2,
-        )
-
-        distance_text = (
-            "N/A"
-            if distance_m is None
-            else f"{distance_m:.1f} m"
-        )
-
-        ttc_text = (
-            "N/A"
-            if ttc_s is None
-            else f"{ttc_s:.1f} s"
-        )
-
-        self._put_text(
-            canvas,
-            "DISTANCE",
-            (55, 465),
-            scale=0.45,
-            color=MUTED,
-            thickness=1,
-        )
-        self._put_text(
-            canvas,
-            distance_text,
-            (55, 503),
-            scale=0.80,
-            color=MUTED if stale else WHITE,
-            thickness=2,
-        )
-
-        self._put_text(
-            canvas,
-            "TTC",
-            (55, 545),
-            scale=0.45,
-            color=MUTED,
-            thickness=1,
-        )
-        self._put_text(
-            canvas,
-            ttc_text,
-            (55, 577),
-            scale=0.80,
-            color=MUTED if stale else color,
-            thickness=2,
-        )
-
-        if cooperative:
-            # Attribution label, not an interactive control.
-            attribution_color = MUTED if stale else BLUE
-            cv2.circle(
-                canvas, (60, 604), 4,
-                attribution_color, -1, cv2.LINE_AA,
-            )
-            self._put_text(
-                canvas,
-                "RSU IN LAST SNAPSHOT" if stale else "RSU COOPERATIVE DETECTION",
-                (73, 609),
-                scale=0.36,
-                color=attribution_color,
-                thickness=1,
-            )
-
-    def _draw_spatial_view(
-        self,
-        canvas: np.ndarray,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool = False,
-    ) -> None:
-        x1, y1, x2, y2 = 340, 115, 930, 625
-        self._panel(canvas, (x1, y1), (x2, y2))
-
-        self._put_text(
-            canvas,
-            "LAST KNOWN ROAD VIEW" if stale else "ROAD AHEAD",
-            (365, 150),
-            scale=0.59,
-            color=MUTED if stale else WHITE,
-            thickness=2,
-        )
-        self._put_text(
-            canvas,
-            "TOP-DOWN  /  EGO-RELATIVE SCHEMATIC",
-            (365, 177),
-            scale=0.34,
-            color=MUTED,
-            thickness=1,
-        )
-
-        # This is an ego-relative schematic, not a geocoded map or
-        # a claim of calibrated lane geometry. Distance bands and
-        # detected positions share the same 0-30 m plotting scale.
-        center_x = (x1 + x2) // 2
-        road_left, road_right = center_x - 125, center_x + 125
-        road_top, road_bottom = 204, 604
-        ego_y, forward_span = 568, 340
-
-        rounded_rect(
-            canvas,
-            (road_left - 18, road_top),
-            (road_right + 18, road_bottom),
-            fill=(21, 21, 24),
-            radius=15,
-        )
-        rounded_rect(
-            canvas,
-            (road_left, road_top),
-            (road_right, road_bottom),
-            fill=(34, 34, 38),
-            border=(53, 53, 60),
-            radius=12,
-        )
-
-        # Boundaries are illustrative. The center dashes indicate
-        # the ego path, not a divider between separate lanes.
-        for edge_x in (road_left + 12, road_right - 12):
-            cv2.line(
-                canvas,
-                (edge_x, road_top + 18),
-                (edge_x, road_bottom - 18),
-                (90, 90, 98),
-                2,
-                cv2.LINE_AA,
-            )
-
-        for distance_m in (10, 20, 30):
-            tick_y = int(ego_y - distance_m / 30.0 * forward_span)
-            cv2.line(
-                canvas,
-                (road_left + 18, tick_y),
-                (road_right - 18, tick_y),
-                (48, 48, 53),
-                1,
-                cv2.LINE_AA,
-            )
-            self._put_text(
-                canvas,
-                f"{distance_m} m",
-                (374, tick_y + 5),
-                scale=0.36,
-                color=MUTED,
-                thickness=1,
-            )
-
-        for dash_y in range(road_top + 31, ego_y - 25, 48):
-            cv2.line(
-                canvas,
-                (center_x, dash_y),
-                (center_x, dash_y + 23),
-                BLUE if not stale else (73, 73, 78),
-                2,
-                cv2.LINE_AA,
-            )
-
-        draw_navigation_marker(
-            canvas,
-            (center_x, ego_y),
-            size=19,
-            color=MUTED if stale else WHITE,
-            heading_deg=0.0,
-            halo=True,
-        )
-        self._put_text(
-            canvas,
-            "EGO",
-            (center_x - 18, ego_y + 38),
-            scale=0.34,
-            color=MUTED,
-            thickness=1,
-        )
-
-        primary = (snapshot.get("hazard") or {}).get("primary")
-        if not primary:
-            self._put_text(
-                canvas,
-                "NO RECENT TARGET DATA" if stale else "NO IMMEDIATE HAZARD",
-                (center_x - 105, 279),
-                scale=0.43,
-                color=MUTED if stale else GREEN,
-                thickness=1,
-            )
+        forward = self._finite(primary.get("longitudinal_m"))
+        lateral = self._finite(primary.get("lateral_m"))
+        if forward is None or lateral is None:
+            self._put_text(canvas, "POSITION UNAVAILABLE", (553, 630),
+                           scale=0.43, color=MUTED, thickness=1)
             return
-
-        forward = self._number(primary.get("longitudinal_m"))
-        lateral = self._number(primary.get("lateral_m"))
-        if forward is None or lateral is None or not all(
-            math.isfinite(value) for value in (forward, lateral)
-        ):
-            self._put_text(
-                canvas,
-                "TARGET POSITION UNAVAILABLE",
-                (center_x - 132, 279),
-                scale=0.43,
-                color=MUTED,
-                thickness=1,
-            )
+        if not (0 <= forward <= 30 and -4 <= lateral <= 4):
+            self._put_text(canvas, "TARGET OUTSIDE VIEW", (552, 630),
+                           scale=0.43, color=MUTED, thickness=1)
             return
-
-        # Do not place off-scale objects at misleading map-edge coordinates.
-        if forward < 0.0 or forward > 30.0 or abs(lateral) > 4.0:
-            self._put_text(
-                canvas,
-                "TARGET OUTSIDE CURRENT VIEW",
-                (center_x - 140, 279),
-                scale=0.43,
-                color=MUTED,
-                thickness=1,
-            )
-            return
-
-        hazard_y = int(ego_y - forward / 30.0 * forward_span)
-        hazard_x = int(center_x + lateral / 4.0 * 110)
-        hazard_level = str(
-            (snapshot.get("hazard") or {}).get("control_level", "NORMAL")
-        ).upper()
-        color = MUTED if stale else self._hazard_color(hazard_level)
-        class_name = str(primary.get("class_name") or "object").upper()
-
-        draw_object_marker(
-            canvas,
-            (hazard_x, hazard_y),
-            class_name,
-            color=color,
-            size=22 if hazard_level == "CRITICAL" else 19,
-            primary=True,
-        )
-        (text_width, _), _ = cv2.getTextSize(
-            class_name, cv2.FONT_HERSHEY_DUPLEX, 0.49, 2
-        )
-        label_x = hazard_x + 30
-        if label_x + text_width > x2 - 18:
-            label_x = hazard_x - text_width - 30
-        label_x = max(x1 + 16, label_x)
-        label_y = max(road_top + 36, min(road_bottom - 40, hazard_y - 4))
-        self._put_text(
-            canvas,
-            class_name,
-            (label_x, label_y),
-            scale=0.49,
-            color=color,
-            thickness=2,
-        )
-
+        px = int(cx+lateral/4.0*138)
+        py = int(ego_y-forward/30.0*span)
+        level = str(hazard.get("control_level", "NORMAL")).upper()
+        color = MUTED if stale else self._hazard_color(level)
+        klass = str(primary.get("class_name") or "OBJECT").upper()
+        # Glow is local to the target to avoid frame-sized allocations.
+        glow = canvas[max(0, py-37):py+38, max(0, px-37):px+38].copy()
+        if glow.size:
+            gx, gy = min(37, px), min(37, py)
+            tinted = glow.copy()
+            cv2.circle(tinted, (gx, gy), 31, color, -1, cv2.LINE_AA)
+            cv2.addWeighted(tinted, 0.13, glow, 0.87, 0, dst=glow)
+            canvas[max(0, py-37):py+38, max(0, px-37):px+38] = glow
+        draw_object_marker(canvas, (px, py), klass,
+                           color=color, size=20, primary=True)
+        (tw, _), _ = cv2.getTextSize(
+            klass, cv2.FONT_HERSHEY_DUPLEX, 0.52, 2)
+        tx = px+37 if px+37+tw <= 794 else px-tw-37
+        tx = max(56, tx)
+        ty = max(192, min(606, py+5))
+        self._fit_text(canvas, klass, (tx, ty), 178, 0.52, color, 2)
         sources = primary.get("sources") or []
-        source_name = str(sources[0]).upper() if sources else ""
-        if source_name:
-            self._put_text(
-                canvas,
-                source_name[:18],
-                (label_x, label_y + 20),
-                scale=0.35,
-                color=MUTED if stale else BLUE,
-                thickness=1,
-            )
+        if sources:
+            self._fit_text(canvas, str(sources[0]).upper(),
+                           (tx, ty+22), 170, 0.38,
+                           MUTED if stale else BLUE, 1)
 
-    def _draw_action_panel(
-        self,
-        canvas: np.ndarray,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool = False,
-    ) -> None:
-        self._panel(
-            canvas,
-            (960, 115),
-            (1250, 625),
-        )
-
+    def _draw_hazard(self, canvas: np.ndarray, snapshot: Dict[str, Any],
+                     stale: bool) -> None:
         hazard = snapshot.get("hazard") or {}
-        braking = snapshot.get("braking") or {}
-        presentation = derive_presentation_state(
-            snapshot,
-            stale=stale,
-        )
+        primary = hazard.get("primary") or None
+        level = str(hazard.get("control_level", "NORMAL")).upper()
+        color = MUTED if stale else self._hazard_color(level)
+        self._put_text(canvas, "HAZARD", (875, 58),
+                       scale=0.52, color=MUTED, thickness=1)
+        self._fit_text(canvas, "LAST KNOWN" if stale else level,
+                       (1098, 58), 134, 0.43, color, 2)
+        klass = (str(primary.get("class_name") or "OBJECT").upper()
+                 if primary else "ROAD CLEAR")
+        self._fit_text(canvas, klass, (875, 114), 347, 0.91,
+                       color if primary else (MUTED if stale else GREEN), 2)
+        self._put_text(canvas, "DISTANCE", (875, 157),
+                       scale=0.42, color=MUTED, thickness=1)
+        self._put_text(canvas, "TIME TO COLLISION", (1054, 157),
+                       scale=0.38, color=MUTED, thickness=1)
+        distance = self._finite(primary.get("distance_m")) if primary else None
+        ttc = self._finite(primary.get("ttc_s")) if primary else None
+        self._put_text(canvas, "--" if distance is None else f"{distance:.1f} m",
+                       (875, 209), scale=0.83,
+                       color=MUTED if stale else WHITE, thickness=2)
+        self._put_text(canvas, "--" if ttc is None else f"{ttc:.1f} s",
+                       (1054, 209), scale=0.83, color=color, thickness=2)
 
-        level = str(
-            hazard.get("control_level", "NORMAL")
-        ).upper()
-        color = self._hazard_color(level)
+    def _draw_vehicle(self, canvas: np.ndarray, snapshot: Dict[str, Any],
+                      stale: bool, presentation: Dict[str, Any]) -> None:
+        self._put_text(canvas, "VEHICLE RESPONSE", (875, 290),
+                       scale=0.52, color=MUTED, thickness=1)
+        action = str(presentation["vehicle_action"])
+        color = (MUTED if stale else GREEN
+                 if action in ("DRIVING", "STOPPED")
+                 else self._hazard_color(str(presentation["hazard_level"])))
+        self._fit_text(canvas, action, (875, 351), 350, 0.87, color, 2)
+        cv2.line(canvas, (875, 373), (1224, 373),
+                 (67, 64, 68), 1, cv2.LINE_AA)
+        self._put_text(canvas, "CURRENT SPEED", (875, 403),
+                       scale=0.40, color=MUTED, thickness=1)
+        self._put_text(canvas, "TARGET SPEED", (1063, 403),
+                       scale=0.40, color=MUTED, thickness=1)
+        current = self._finite((snapshot.get("ego") or {}).get("speed_mps"))
+        target = self._finite((snapshot.get("braking") or {}).get("target_speed_mps"))
+        current_txt = "--" if current is None else f"{current*3.6:.1f}"
+        target_txt = "--" if target is None else f"{target*3.6:.1f}"
+        for x, value, maxw in ((875, current_txt, 167),
+                               (1063, target_txt, 165)):
+            self._fit_text(canvas, f"{value} km/h", (x, 446), maxw,
+                           0.72, MUTED if stale else WHITE, 2)
 
-        self._put_text(
-            canvas,
-            "LAST KNOWN RESPONSE" if stale else "VEHICLE RESPONSE",
-            (985, 150),
-            scale=0.52,
-            color=MUTED,
-            thickness=1,
-        )
+    def _draw_system(self, canvas: np.ndarray, snapshot: Dict[str, Any],
+                     stale: bool, presentation: Dict[str, Any]) -> None:
+        self._put_text(canvas, "COOPERATIVE SYSTEM", (875, 529),
+                       scale=0.53, color=MUTED, thickness=1)
+        cooperative = bool(presentation["cooperative_active"]) and not stale
+        perception = str(presentation["perception_text"])
+        status_color = CAUTION if stale else BLUE if cooperative else WHITE
+        self._fit_text(canvas, perception, (875, 574), 345,
+                       0.65, status_color, 2)
+        cv2.line(canvas, (875, 590), (1224, 590),
+                 (67, 64, 68), 1, cv2.LINE_AA)
+        self._put_text(canvas, "DATA", (875, 616),
+                       scale=0.36, color=MUTED, thickness=1)
+        self._put_text(canvas, "SYSTEM", (1062, 616),
+                       scale=0.36, color=MUTED, thickness=1)
+        self._fit_text(canvas, str(presentation["data_status"]),
+                       (875, 647), 159, 0.51,
+                       CAUTION if stale else GREEN, 2)
+        health = str(presentation["display_health"])
+        self._fit_text(canvas, health, (1062, 647), 166, 0.51,
+                       CAUTION if stale else GREEN if health == "HEALTHY" else MUTED, 2)
+        sources = presentation["sources"] or []
+        text_sources = " + ".join(str(s).upper() for s in sources)
+        if not text_sources:
+            text_sources = "NO LIVE SOURCES" if stale else "ONBOARD ONLY"
+        self._fit_text(canvas, f"SOURCE  {text_sources}",
+                       (875, 679), 345, 0.35, MUTED, 1)
 
-        action = str(
-            presentation["vehicle_action"]
-        )
-
-        action_color = (
-            GREEN
-            if action in ("DRIVING", "STOPPED")
-            else color
-        )
-
-        # Fit long states such as EMERGENCY BRAKING within the panel.
-        action_scale = 0.64
-        (action_width, _), _ = cv2.getTextSize(
-            action, cv2.FONT_HERSHEY_DUPLEX, action_scale, 2
-        )
-        if action_width > 238:
-            action_scale *= 238.0 / action_width
-
-        self._put_text(
-            canvas,
-            action,
-            (985, 211),
-            scale=action_scale,
-            color=MUTED if stale else action_color,
-            thickness=2,
-        )
-
-        target_speed = self._number(
-            braking.get("target_speed_mps")
-        )
-
-        if target_speed is not None:
-            self._put_text(
-                canvas,
-                "TARGET SPEED",
-                (985, 255),
-                scale=0.42,
-                color=MUTED,
-                thickness=1,
-            )
-            self._put_text(
-                canvas,
-                f"{target_speed * 3.6:.1f} km/h",
-                (985, 302),
-                scale=0.76,
-                color=MUTED if stale else WHITE,
-                thickness=2,
-            )
-
-        cv2.line(
-            canvas, (985, 336), (1225, 336),
-            BORDER_SOFT, 1, cv2.LINE_AA,
-        )
-        self._put_text(
-            canvas,
-            "PERCEPTION",
-            (985, 367),
-            scale=0.42,
-            color=MUTED,
-            thickness=1,
-        )
-
-        cooperative = bool(
-            presentation["cooperative_active"]
-        )
-
-        perception_text = str(
-            presentation["perception_text"]
-        )
-
-        self._put_text(
-            canvas,
-            perception_text,
-            (985, 402),
-            scale=0.5,
-            color=MUTED if stale else BLUE if cooperative else WHITE,
-            thickness=2,
-        )
-
-        # Attribution uses the primary hazard's existing source metadata.
-        # No inference, transport or fusion values are changed here.
-        primary_sources = [
-            str(source).upper()
-            for source in (presentation["sources"] or [])
-            if source
-        ]
-        source_text = (
-            " + ".join(primary_sources)
-            if primary_sources else "NO PRIMARY TARGET"
-        )
-        if len(source_text) > 25:
-            source_text = source_text[:22] + "..."
-
-        self._put_text(
-            canvas,
-            "TARGET SOURCES",
-            (985, 442),
-            scale=0.42,
-            color=MUTED,
-            thickness=1,
-        )
-        self._put_text(
-            canvas,
-            source_text,
-            (985, 475),
-            scale=0.45,
-            color=MUTED if stale else BLUE if cooperative else WHITE,
-            thickness=1,
-        )
-
-        health_status = str(
-            presentation["display_health"]
-        )
-
-        cv2.line(
-            canvas, (985, 503), (1225, 503),
-            BORDER_SOFT, 1, cv2.LINE_AA,
-        )
-        self._put_text(
-            canvas,
-            "SYSTEM STATUS",
-            (985, 543),
-            scale=0.42,
-            color=MUTED,
-            thickness=1,
-        )
-
-        self._put_text(
-            canvas,
-            health_status,
-            (985, 581),
-            scale=0.58,
-            color=(
-                GREEN
-                if health_status == "HEALTHY"
-                else CAUTION
-                if stale
-                else color
-            ),
-            thickness=2,
-        )
-
-    def _draw_footer(
-        self,
-        canvas: np.ndarray,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool = False,
-    ) -> None:
-        cv2.rectangle(
-            canvas,
-            (0, 663),
-            (self.width, self.height),
-            PANEL_LIGHT,
-            -1,
-        )
-
-        cv2.line(
-            canvas, (0, 663), (self.width, 663),
-            BORDER_SOFT, 1, cv2.LINE_AA,
-        )
-
-        presentation = derive_presentation_state(
-            snapshot,
-            stale=stale,
-        )
-
-        level = str(
-            presentation["hazard_level"]
-        )
-        message = str(
-            presentation["footer_message"]
-        )
-
-        footer_color = (
-            CAUTION if stale else self._hazard_color(level)
-        )
-        cv2.rectangle(
-            canvas,
-            (30, 675),
-            (34, 705),
-            footer_color,
-            -1,
-        )
-        self._put_text(
-            canvas,
-            message,
-            (50, 701),
-            scale=0.61,
-            color=footer_color,
-            thickness=2,
-        )
-
-    def render(
-        self,
-        snapshot: Dict[str, Any],
-        *,
-        stale: bool = False,
-    ) -> np.ndarray:
-        canvas = np.full(
-            (self.height, self.width, 3),
-            BACKGROUND,
-            dtype=np.uint8,
-        )
-
-        self._draw_header(
-            canvas,
-            snapshot,
-            stale=stale,
-        )
-        self._draw_speed(canvas, snapshot, stale=stale)
-        self._draw_hazard_card(canvas, snapshot, stale=stale)
-        self._draw_spatial_view(canvas, snapshot, stale=stale)
-        self._draw_action_panel(
-            canvas,
-            snapshot,
-            stale=stale,
-        )
-        self._draw_footer(
-            canvas,
-            snapshot,
-            stale=stale,
-        )
-
+    def render(self, snapshot: Dict[str, Any],
+               *, stale: bool = False) -> np.ndarray:
+        """Render four connected cards from the unchanged snapshot schema."""
+        presentation = derive_presentation_state(snapshot, stale=stale)
+        canvas = self._base_canvas.copy()
+        self._draw_road(canvas, snapshot, stale)
+        self._draw_hazard(canvas, snapshot, stale)
+        self._draw_vehicle(canvas, snapshot, stale, presentation)
+        self._draw_system(canvas, snapshot, stale, presentation)
+        if self.width != 1280 or self.height != 720:
+            canvas = cv2.resize(
+                canvas, (self.width, self.height),
+                interpolation=cv2.INTER_AREA)
         return canvas
