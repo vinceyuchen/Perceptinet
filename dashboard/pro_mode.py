@@ -391,13 +391,50 @@ class ProModeRenderer:
             if when is not None:
                 candidates.append((when, str(source)))
 
-        if not candidates:
-            # Backward-compatible fallback for the current Metrics v1
-            # summary, which separately exposes the earliest RSU.
-            source = detection.get("earliest_rsu_source")
-            return None if source is None else str(source)
+        if candidates:
+            return min(candidates, key=lambda item: item[0])[1]
 
-        return min(candidates, key=lambda item: item[0])[1]
+        # Metrics summaries may be absent in lightweight/test snapshots while
+        # the significant timeline still contains stable-detection events.
+        # Use the earliest stable-detection event as the authoritative fallback.
+        timeline_candidates: List[Tuple[float, int, str]] = []
+
+        for event in snapshot.get("timeline") or []:
+            if str(event.get("event_type")) != "stable_detection":
+                continue
+
+            source = event.get("source_id") or event.get("source")
+            if not source:
+                continue
+
+            when = ProModeRenderer._number(
+                event.get("sim_time_s"),
+                float("inf"),
+            )
+            frame_id = event.get("frame_id")
+
+            try:
+                frame_order = int(frame_id)
+            except (TypeError, ValueError):
+                frame_order = 2**63 - 1
+
+            timeline_candidates.append(
+                (
+                    float("inf") if when is None else when,
+                    frame_order,
+                    str(source),
+                )
+            )
+
+        if timeline_candidates:
+            return min(
+                timeline_candidates,
+                key=lambda item: (item[0], item[1]),
+            )[2]
+
+        # Backward-compatible fallback for Metrics v1.
+        source = detection.get("earliest_rsu_source")
+        return None if source is None else str(source)
 
     @staticmethod
     def _object_color(
