@@ -300,7 +300,7 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "LAST KNOWN SPEED" if stale else "SPEED",
+            "LAST KNOWN SPEED" if stale else "CURRENT SPEED",
             (55, 150),
             scale=0.55,
             color=MUTED,
@@ -488,10 +488,57 @@ class DriverModeRenderer:
             thickness=1,
         )
 
-        # Road corridor
+        # Driver-facing schematic, not a metric-accurate road rendering.
         road_top_y = 190
         road_bottom_y = 600
         center_x = (x1 + x2) // 2
+
+        self._put_text(
+            canvas,
+            "EGO-RELATIVE  /  SCHEMATIC",
+            (365, 174),
+            scale=0.35,
+            color=MUTED,
+            thickness=1,
+        )
+
+        # A subtle corridor fill improves depth without implying a mapped lane.
+        road_polygon = np.array(
+            [
+                [center_x - 55, road_top_y],
+                [center_x + 55, road_top_y],
+                [center_x + 145, road_bottom_y],
+                [center_x - 145, road_bottom_y],
+            ],
+            dtype=np.int32,
+        )
+        cv2.fillConvexPoly(
+            canvas, road_polygon, (27, 27, 30)
+        )
+
+        # Labels share the same illustrative 0-30 m vertical scale as
+        # the primary hazard marker, so they remain visually consistent.
+        for distance_m in (10, 20, 30):
+            tick_y = int(
+                road_bottom_y - 70
+                - (distance_m / 30.0) * 330
+            )
+            self._put_text(
+                canvas,
+                f"{distance_m} m",
+                (370, tick_y + 5),
+                scale=0.36,
+                color=MUTED,
+                thickness=1,
+            )
+            cv2.line(
+                canvas,
+                (419, tick_y),
+                (441, tick_y),
+                BORDER_SOFT,
+                1,
+                cv2.LINE_AA,
+            )
 
         cv2.line(
             canvas,
@@ -686,11 +733,19 @@ class DriverModeRenderer:
             else color
         )
 
+        # Fit long states such as EMERGENCY BRAKING within the panel.
+        action_scale = 0.64
+        (action_width, _), _ = cv2.getTextSize(
+            action, cv2.FONT_HERSHEY_DUPLEX, action_scale, 2
+        )
+        if action_width > 238:
+            action_scale *= 238.0 / action_width
+
         self._put_text(
             canvas,
             action,
-            (985, 205),
-            scale=0.64,
+            (985, 211),
+            scale=action_scale,
             color=MUTED if stale else action_color,
             thickness=2,
         )
@@ -713,7 +768,7 @@ class DriverModeRenderer:
                 f"{target_speed * 3.6:.1f} km/h",
                 (985, 290),
                 scale=0.72,
-                color=WHITE,
+                color=MUTED if stale else WHITE,
                 thickness=2,
             )
             self._put_text(
@@ -755,18 +810,49 @@ class DriverModeRenderer:
             thickness=2,
         )
 
+        # Attribution uses the primary hazard's existing source metadata.
+        # No inference, transport or fusion values are changed here.
+        primary_sources = [
+            str(source).upper()
+            for source in (presentation["sources"] or [])
+            if source
+        ]
+        source_text = (
+            " + ".join(primary_sources)
+            if primary_sources else "NO PRIMARY TARGET"
+        )
+        if len(source_text) > 25:
+            source_text = source_text[:22] + "..."
+
+        self._put_text(
+            canvas,
+            "TARGET SOURCES",
+            (985, 442),
+            scale=0.42,
+            color=MUTED,
+            thickness=1,
+        )
+        self._put_text(
+            canvas,
+            source_text,
+            (985, 475),
+            scale=0.45,
+            color=MUTED if stale else BLUE if cooperative else WHITE,
+            thickness=1,
+        )
+
         health_status = str(
             presentation["display_health"]
         )
 
         cv2.line(
-            canvas, (985, 431), (1225, 431),
+            canvas, (985, 503), (1225, 503),
             BORDER_SOFT, 1, cv2.LINE_AA,
         )
         self._put_text(
             canvas,
-            "SYSTEM",
-            (985, 463),
+            "SYSTEM STATUS",
+            (985, 543),
             scale=0.42,
             color=MUTED,
             thickness=1,
@@ -775,7 +861,7 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             health_status,
-            (985, 502),
+            (985, 581),
             scale=0.58,
             color=(
                 GREEN
@@ -786,24 +872,6 @@ class DriverModeRenderer:
             ),
             thickness=2,
         )
-
-        if health_status != "HEALTHY":
-            self._put_text(
-                canvas,
-                "Cooperative perception",
-                (985, 550),
-                scale=0.4,
-                color=MUTED,
-                thickness=1,
-            )
-            self._put_text(
-                canvas,
-                "limited",
-                (985, 575),
-                scale=0.4,
-                color=MUTED,
-                thickness=1,
-            )
 
     def _draw_footer(
         self,
@@ -837,12 +905,22 @@ class DriverModeRenderer:
             presentation["footer_message"]
         )
 
+        footer_color = (
+            CAUTION if stale else self._hazard_color(level)
+        )
+        cv2.rectangle(
+            canvas,
+            (30, 675),
+            (34, 705),
+            footer_color,
+            -1,
+        )
         self._put_text(
             canvas,
             message,
-            (35, 701),
-            scale=0.63,
-            color=CAUTION if stale else self._hazard_color(level),
+            (50, 701),
+            scale=0.61,
+            color=footer_color,
             thickness=2,
         )
 
