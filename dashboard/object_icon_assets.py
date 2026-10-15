@@ -28,7 +28,12 @@ _MASKS = {
     "PEDESTRIAN": "c-no=F%H5o3<Xd}9Wwd`_$K693`owFkt=oM8mW4Luz84LY!$UdLj2(kUrua*Eg`$uT$01o|9PH_6@KLka0g(a0ic#|S=D+{wJ#>s*&gtK-EGUMxv5?tG*!&et@s-JXtWG2lGdJ{o!!B!khwH0W{qW}7BY5{X(quQYiiMNsKL#jORTE<Ue6nmsBF^",
 }
 
-ICON_ALIASES = {"BUS": "TRUCK", "BICYCLE": "MOTORCYCLE"}
+ICON_ALIASES = {
+    "BUS": "TRUCK",
+    "BICYCLE": "MOTORCYCLE",
+    "PERSON": "PEDESTRIAN",
+    "MOTORBIKE": "MOTORCYCLE",
+}
 
 
 def resolve_icon(kind: str) -> str:
