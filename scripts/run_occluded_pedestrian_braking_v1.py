@@ -34,11 +34,11 @@ from validation.runtime import ValidationConfig, ValidationRunTracker
 EGO_TEST_SPEED_MPS = 4.0
 EGO_STOP_DISTANCE_M = 1.5
 
-# Let newly spawned dynamic actors settle onto the CARLA road surface before
-# freezing the deterministic demo geometry. This improves visual grounding
-# without changing the kinematic control model used by the validated pipeline.
-SCENE_GROUND_SETTLE_TICKS = 6
-SCENE_GROUND_MAX_XY_DRIFT_M = 0.35
+# Deterministic visual grounding. Actors remain physics-disabled and are
+# translated only in Z so the lowest face of their CARLA bounding box sits
+# just above the projected road surface.
+SCENE_GROUND_CLEARANCE_M = 0.03
+SCENE_GROUND_MAX_Z_ADJUST_M = 1.50
 
 # Once the Ego Vehicle is fully stopped, require a short run
 # of stable NORMAL observations before releasing the safety latch.
@@ -486,6 +486,88 @@ def spawn_first_available(
     )
 
 
+def snap_actor_bbox_to_road(
+    actor,
+    world_map,
+    label,
+    *,
+    clearance_m=SCENE_GROUND_CLEARANCE_M,
+):
+    """
+    Ground one static demo actor without enabling CARLA physics.
+
+    CARLA vehicle coordinates are normally close to the lowest face of the
+    vehicle bounding box in Z, while pedestrian coordinates are normally near
+    the middle of their bounding box. Using the actor's actual world-space
+    bounding-box vertices handles both conventions consistently.
+    """
+
+    transform = actor.get_transform()
+
+    waypoint = world_map.get_waypoint(
+        transform.location,
+        project_to_road=True,
+        lane_type=carla.LaneType.Driving,
+    )
+
+    if waypoint is None:
+        raise RuntimeError(
+            f"Could not project {label} onto driving surface"
+        )
+
+    road_z = float(
+        waypoint.transform.location.z
+    )
+
+    vertices = actor.bounding_box.get_world_vertices(
+        transform
+    )
+
+    if not vertices:
+        raise RuntimeError(
+            f"No bounding-box vertices for {label}"
+        )
+
+    bbox_bottom_z = min(
+        float(vertex.z)
+        for vertex in vertices
+    )
+
+    target_bottom_z = (
+        road_z + float(clearance_m)
+    )
+
+    z_adjust_m = (
+        target_bottom_z - bbox_bottom_z
+    )
+
+    if abs(z_adjust_m) > SCENE_GROUND_MAX_Z_ADJUST_M:
+        raise RuntimeError(
+            f"Ground snap for {label} is implausibly large: "
+            f"dz={z_adjust_m:+.3f}m"
+        )
+
+    grounded = carla.Transform(
+        carla.Location(
+            x=transform.location.x,
+            y=transform.location.y,
+            z=transform.location.z + z_adjust_m,
+        ),
+        transform.rotation,
+    )
+
+    actor.set_transform(grounded)
+
+    print(
+        f"Road snap | {label} | "
+        f"road_z={road_z:.3f}m | "
+        f"bbox_bottom={bbox_bottom_z:.3f}m | "
+        f"dz={z_adjust_m:+.3f}m"
+    )
+
+    return grounded
+
+
 def normalize_name(name):
     return CLASS_NAME_OVERRIDES.get(name, name)
 
@@ -812,6 +894,7 @@ def main():
         )
 
         actors.append(ego_vehicle)
+        ego_vehicle.set_simulate_physics(False)
 
         occluder_transforms = []
 
@@ -842,6 +925,7 @@ def main():
         )
 
         actors.append(occluder_vehicle)
+        occluder_vehicle.set_simulate_physics(False)
 
         # ----------------------------------------------------
         # Verify that the truck no longer intersects the
@@ -933,80 +1017,59 @@ def main():
         actors.append(pedestrian)
 
         # ----------------------------------------------------
-        # Visual grounding pass
+        # Deterministic visual grounding pass
         #
-        # Vehicles are spawned with physics enabled for a few synchronous
-        # ticks so CARLA can settle them onto the road surface. We then freeze
-        # Ego and the occluding truck and refresh every transform used by the
-        # deterministic path/risk model.
+        # Never enable physics here. The validated demo uses deterministic
+        # kinematic motion, so allowing CARLA physics to settle these actors
+        # can change XY geometry unpredictably. Instead, move each actor only
+        # in Z until its world-space bounding-box bottom is just above the
+        # projected road surface.
         # ----------------------------------------------------
 
-        pre_settle_ego = ego_vehicle.get_transform()
-        pre_settle_truck = occluder_vehicle.get_transform()
-        pre_settle_pedestrian = pedestrian.get_transform()
+        pedestrian.set_simulate_physics(False)
 
-        print(
-            "Ground settling scene | "
-            f"ticks={SCENE_GROUND_SETTLE_TICKS}"
+        world_map = world.get_map()
+
+        print("Ground snapping scene to road surface...")
+
+        ego_transform = snap_actor_bbox_to_road(
+            ego_vehicle,
+            world_map,
+            "Ego Vehicle",
+        )
+        occluder_transform = snap_actor_bbox_to_road(
+            occluder_vehicle,
+            world_map,
+            "Occluding Vehicle",
+        )
+        pedestrian_transform = snap_actor_bbox_to_road(
+            pedestrian,
+            world_map,
+            "Pedestrian",
         )
 
-        for _ in range(SCENE_GROUND_SETTLE_TICKS):
-            world.tick()
-
-        ego_vehicle.set_simulate_physics(False)
-        occluder_vehicle.set_simulate_physics(False)
+        # Let transform updates become visible to sensors/snapshots.
+        world.tick()
 
         ego_transform = ego_vehicle.get_transform()
         occluder_transform = occluder_vehicle.get_transform()
         pedestrian_transform = pedestrian.get_transform()
 
-        def xy_drift(before, after):
-            return math.hypot(
-                after.location.x - before.location.x,
-                after.location.y - before.location.y,
-            )
-
-        ego_ground_drift_m = xy_drift(
-            pre_settle_ego,
-            ego_transform,
-        )
-        truck_ground_drift_m = xy_drift(
-            pre_settle_truck,
-            occluder_transform,
-        )
-        pedestrian_ground_drift_m = xy_drift(
-            pre_settle_pedestrian,
-            pedestrian_transform,
-        )
-
         print(
-            "Ground settle result | "
-            f"ego_dz="
-            f"{ego_transform.location.z - pre_settle_ego.location.z:+.3f}m | "
-            f"truck_dz="
-            f"{occluder_transform.location.z - pre_settle_truck.location.z:+.3f}m | "
-            f"ped_dz="
-            f"{pedestrian_transform.location.z - pre_settle_pedestrian.location.z:+.3f}m | "
-            f"xy_drift=("
-            f"{ego_ground_drift_m:.3f}, "
-            f"{truck_ground_drift_m:.3f}, "
-            f"{pedestrian_ground_drift_m:.3f})m"
+            "Road snap verified | "
+            f"ego=({ego_transform.location.x:.2f}, "
+            f"{ego_transform.location.y:.2f}, "
+            f"{ego_transform.location.z:.2f}) | "
+            f"truck=({occluder_transform.location.x:.2f}, "
+            f"{occluder_transform.location.y:.2f}, "
+            f"{occluder_transform.location.z:.2f}) | "
+            f"pedestrian=({pedestrian_transform.location.x:.2f}, "
+            f"{pedestrian_transform.location.y:.2f}, "
+            f"{pedestrian_transform.location.z:.2f})"
         )
 
-        if max(
-            ego_ground_drift_m,
-            truck_ground_drift_m,
-            pedestrian_ground_drift_m,
-        ) > SCENE_GROUND_MAX_XY_DRIFT_M:
-            raise RuntimeError(
-                "Ground settling changed scenario XY geometry too much: "
-                f"ego={ego_ground_drift_m:.3f}m, "
-                f"truck={truck_ground_drift_m:.3f}m, "
-                f"pedestrian={pedestrian_ground_drift_m:.3f}m"
-            )
-
-        # Rebuild the Ego right vector from the settled heading so all
-        # geometry checks use the same final frame as motion and risk.
+        # Rebuild the Ego right vector from the final grounded heading so all
+        # geometry checks use the same frame as motion and risk.
         ego_right = ego_transform.get_right_vector()
 
         settled_truck_dx = (
@@ -1028,7 +1091,7 @@ def main():
         )
 
         print(
-            "Settled truck path geometry | "
+            "Grounded truck path geometry | "
             f"lateral={settled_truck_lateral_m:.2f}m | "
             f"clearance={settled_truck_clearance_m:.2f}m"
         )
@@ -1038,7 +1101,7 @@ def main():
             < TRUCK_PATH_CLEARANCE_MIN_M
         ):
             raise RuntimeError(
-                "Settled occluding truck intersects Ego path: "
+                "Grounded occluding truck intersects Ego path: "
                 f"clearance={settled_truck_clearance_m:.2f}m"
             )
 
