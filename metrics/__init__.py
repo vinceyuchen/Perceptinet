@@ -1,1 +1,1 @@
-from .collector import MetricsCollector\n
+from .collector import MetricsCollector
