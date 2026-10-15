@@ -42,11 +42,15 @@ def make_snapshot(level: str, target: str, *, emergency: bool = False,
 
 
 def main():
+    unconfirmed = make_snapshot("WARNING", "CAR")
+    unconfirmed["hazard"]["primary"]["longitudinal_m"] = 0.0
     cases = [
         ("normal", make_snapshot("NORMAL", "CAR")),
+        ("stopped", make_snapshot("NORMAL", "CAR", stopped=True)),
         ("caution", make_snapshot("CAUTION", "PEDESTRIAN")),
         ("warning", make_snapshot("WARNING", "TRUCK")),
         ("emergency", make_snapshot("CRITICAL", "PEDESTRIAN", emergency=True)),
+        ("unconfirmed", unconfirmed),
     ]
     app = PerceptinetDashboardApp(default_mode="DRIVER")
     output = ROOT / "results" / "dashboard_polish_preview"
@@ -58,7 +62,11 @@ def main():
         if not cv2.imwrite(str(path), frame):
             raise RuntimeError(f"Failed to save {path}")
         thumbs.append(cv2.resize(frame, (800, 450), interpolation=cv2.INTER_AREA))
-    contact = np.vstack((np.hstack(thumbs[:2]), np.hstack(thumbs[2:])))
+    contact = np.vstack((
+        np.hstack(thumbs[:2]),
+        np.hstack(thumbs[2:4]),
+        np.hstack(thumbs[4:6]),
+    ))
     contact_path = output / "driver_mode_v71_status_comparison.png"
     if not cv2.imwrite(str(contact_path), contact):
         raise RuntimeError(f"Failed to save {contact_path}")
