@@ -83,6 +83,59 @@ def _dominant_centerline(
     return np.column_stack((alongs, centers))
 
 
+
+def _extend_profile(
+    profile: np.ndarray,
+    target_min: float,
+    target_max: float,
+    *,
+    step: float = 0.5,
+) -> np.ndarray:
+    """Visually continue a fitted street to the Road View's clipping edges.
+
+    Use local endpoint tangents only beyond the last observed samples. Cap
+    extrapolated slope to avoid inventing sharply turning roads. This
+    extends *presentation only*, not CARLA road/topology observations.
+    """
+    if profile is None or len(profile) < 2:
+        return profile
+
+    def endpoint_slope(points: np.ndarray) -> float:
+        axis_span = float(points[-1, 0] - points[0, 0])
+        if abs(axis_span) < 1e-6:
+            return 0.0
+        slope = float((points[-1, 1] - points[0, 1]) / axis_span)
+        return float(np.clip(slope, -0.35, 0.35))
+
+    head = profile[:min(7, len(profile))]
+    tail = profile[-min(7, len(profile)):]
+    first, last = profile[0], profile[-1]
+    head_slope = endpoint_slope(head)
+    tail_slope = endpoint_slope(tail)
+
+    before = np.arange(
+        float(first[0]) - step, target_min - step * 0.5, -step,
+        dtype=np.float64,
+    ) if target_min < first[0] else np.empty(0, dtype=np.float64)
+    after = np.arange(
+        float(last[0]) + step, target_max + step * 0.5, step,
+        dtype=np.float64,
+    ) if target_max > last[0] else np.empty(0, dtype=np.float64)
+
+    parts = []
+    if len(before):
+        before = before[::-1]
+        parts.append(np.column_stack((
+            before, float(first[1]) + (before - first[0]) * head_slope,
+        )))
+    parts.append(profile)
+    if len(after):
+        parts.append(np.column_stack((
+            after, float(last[1]) + (after - last[0]) * tail_slope,
+        )))
+    return np.vstack(parts)
+
+
 def _sample_roads(segments: List[Dict[str, Any]]) -> Dict[str, np.ndarray]:
     groups: Dict[str, List[Tuple[float, float]]] = {
         "forward": [], "cross": [],
@@ -141,6 +194,16 @@ def draw_road_corridors(
     profiles = _sample_roads(segments)
     if not profiles:
         return False
+    # Extend only fitted schematic centerlines, never raw CARLA segments.
+    # Projected coordinates are clipped to the Road View panel below.
+    if "forward" in profiles:
+        profiles["forward"] = _extend_profile(
+            profiles["forward"], -12.0, 62.0
+        )
+    if "cross" in profiles:
+        profiles["cross"] = _extend_profile(
+            profiles["cross"], -45.0, 45.0
+        )
     x0, y0, x1, y1 = clip_rect
     layer = canvas[y0:y1, x0:x1]
     if layer.size == 0:
