@@ -1,21 +1,129 @@
-"""Simplified street corridor outlines for the Driver Mode.
+"""Stylized road centerline schematic for Perceptinet Driver Mode.
 
-CARLA gives sampled lane centerlines, NOT finished street boundaries.
-This module estimates dominant local street corridors and draws only two
-outer edge lines per corridor. It never draws a filled road surface.
-
-This presentation intentionally omits turn connector lanes and minor roads;
-it is a schematic of dominant nearby corridors, not an HD map.
+CARLA provides sampled lane centerlines, not finished street boundaries.
+Infer a dominant forward street and crossing street, smooth their centerlines,
+then render constant-width paired edges. No road surface or buildings.
+The resulting map is illustrative, not survey-accurate.
 """
 
 from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+
+# Fixed schematic width, independent of sampled CARLA lane widths.
+HALF_STREET_WIDTH_M = 4.5
+SAMPLE_BIN_M = 2.0
+MIN_ROAD_SPAN_M = 12.0
+
+
+def _dominant_centerline(
+    samples: List[Tuple[float, float]]
+) -> Optional[np.ndarray]:
+    """Infer smooth [along, offset] road axis from noisy lane centre points."""
+    if len(samples) < 8:
+        return None
+    values = np.asarray(samples, dtype=np.float64)
+    global_center = float(np.median(values[:, 1]))
+    values = values[np.abs(values[:, 1] - global_center) <= 8.0]
+    if len(values) < 8:
+        return None
+    bins: Dict[int, List[float]] = defaultdict(list)
+    for along, offset in values:
+        bins[int(round(along / SAMPLE_BIN_M))].append(float(offset))
+    rows = np.asarray(
+        [(key * SAMPLE_BIN_M, float(np.median(offsets)))
+         for key, offsets in sorted(bins.items())], dtype=np.float64,
+    )
+    if len(rows) < 5:
+        return None
+
+    runs: List[np.ndarray] = []
+    begin = 0
+    for i in range(1, len(rows)):
+        if rows[i, 0] - rows[i - 1, 0] > 4.1:
+            runs.append(rows[begin:i])
+            begin = i
+    runs.append(rows[begin:])
+    rows = max(runs, key=lambda run: (run[-1, 0] - run[0, 0], len(run)))
+    extent = float(rows[-1, 0] - rows[0, 0])
+    if extent < MIN_ROAD_SPAN_M or len(rows) < 5:
+        return None
+
+    u, v = rows[:, 0], rows[:, 1]
+    origin = float(np.mean(u))
+    scale = max(1.0, extent * 0.5)
+    u = (u - origin) / scale
+    keep = np.ones(len(u), dtype=bool)
+    coefficients = np.polynomial.polynomial.polyfit(u, v, deg=2)
+    for _ in range(3):
+        coefficients = np.polynomial.polynomial.polyfit(
+            u[keep], v[keep], deg=min(2, np.count_nonzero(keep) - 1)
+        )
+        errors = v - np.polynomial.polynomial.polyval(u, coefficients)
+        median_error = float(np.median(errors[keep]))
+        median_dev = float(np.median(np.abs(errors[keep] - median_error)))
+        cutoff = max(2.2, 3.0 * 1.4826 * median_dev)
+        next_keep = np.abs(errors - median_error) <= cutoff
+        if np.count_nonzero(next_keep) < 5 or np.array_equal(next_keep, keep):
+            break
+        keep = next_keep
+
+    alongs = np.arange(float(rows[0, 0]), float(rows[-1, 0]) + 0.01, 0.5)
+    centers = np.polynomial.polynomial.polyval(
+        (alongs - origin) / scale, coefficients
+    )
+    return np.column_stack((alongs, centers))
+
+
+def _sample_roads(segments: List[Dict[str, Any]]) -> Dict[str, np.ndarray]:
+    groups: Dict[str, List[Tuple[float, float]]] = {
+        "forward": [], "cross": [],
+    }
+    for segment in segments[:500]:
+        if not isinstance(segment, dict):
+            continue
+        points = segment.get("points")
+        if not isinstance(points, (tuple, list)) or len(points) != 2:
+            continue
+        try:
+            (lat0, fwd0), (lat1, fwd1) = points
+            lat0, fwd0, lat1, fwd1 = (
+                float(lat0), float(fwd0), float(lat1), float(fwd1)
+            )
+        except (ValueError, TypeError, IndexError):
+            continue
+        if not all(math.isfinite(x) for x in (lat0, fwd0, lat1, fwd1)):
+            continue
+        dlat, dfwd = lat1 - lat0, fwd1 - fwd0
+        length = math.hypot(dlat, dfwd)
+        if not 0.4 <= length <= 15.0:
+            continue
+        # Turning connectors must not create street stubs.
+        if abs(dfwd) >= 1.6 * abs(dlat):
+            direction = "forward"
+        elif abs(dlat) >= 1.6 * abs(dfwd):
+            direction = "cross"
+        else:
+            continue
+        count = max(2, int(length / 1.0) + 1)
+        for i in range(count):
+            t = i / (count - 1)
+            lat = lat0 + dlat * t
+            fwd = fwd0 + dfwd * t
+            groups[direction].append(
+                (fwd, lat) if direction == "forward" else (lat, fwd)
+            )
+    return {
+        direction: axis
+        for direction, samples in groups.items()
+        if (axis := _dominant_centerline(samples)) is not None
+    }
 
 
 def draw_road_corridors(
@@ -25,171 +133,71 @@ def draw_road_corridors(
     *,
     clip_rect: Tuple[int, int, int, int] = (54, 142, 800, 682),
 ) -> bool:
-    """Draw the dominant longitudinal and cross streets as unfilled lines.
-
-    Coordinates in input segments: [lateral_m, forward_m] relative to Ego.
-    Intermediate width estimates are derived from lane center positions plus
-    half lane width. Turning connectors and isolated stubs are suppressed.
-    """
-    if not isinstance(segments, list):
+    """Render fixed-width paired street edges without road/terrain fill."""
+    if not isinstance(segments, list) or not segments:
+        return False
+    profiles = _sample_roads(segments)
+    if not profiles:
         return False
     x0, y0, x1, y1 = clip_rect
     layer = canvas[y0:y1, x0:x1]
     if layer.size == 0:
         return False
 
-    groups: Dict[str, Dict[int, List[Tuple[float, float]]]] = {
-        "forward": defaultdict(list),
-        "cross": defaultdict(list),
-    }
-    for segment in segments[:400]:
-        if not isinstance(segment, dict):
-            continue
-        points = segment.get("points")
-        if not isinstance(points, list) or len(points) != 2:
-            continue
-        try:
-            (lat0, fwd0), (lat1, fwd1) = points
-            lat0, fwd0, lat1, fwd1 = (
-                float(lat0), float(fwd0), float(lat1), float(fwd1)
-            )
-            width = float(segment.get("width_m", 3.5))
-        except (ValueError, TypeError, IndexError):
-            continue
-        if (not all(math.isfinite(v) for v in
-                    (lat0, fwd0, lat1, fwd1, width))
-                or not 1.0 <= width <= 10.0):
-            continue
-        dlat, dfwd = lat1 - lat0, fwd1 - fwd0
-        if math.hypot(dlat, dfwd) < 0.25:
-            continue
-        # Ignore turning connectors in the junction interior. Do not
-        # convert them into extra street ends or diagonal stubs.
-        direction = (
-            "forward" if abs(dfwd) >= 1.35 * abs(dlat)
-            else "cross" if abs(dlat) >= 1.35 * abs(dfwd)
-            else None
-        )
-        if direction is None:
-            continue
-        along0, along1 = (
-            (fwd0, fwd1) if direction == "forward"
-            else (lat0, lat1)
-        )
-        samples = max(2, int(math.ceil(abs(along1 - along0) / 0.9)) + 1)
-        for index in range(samples):
-            t = index / (samples - 1)
-            lat = lat0 + t * dlat
-            fwd = fwd0 + t * dfwd
-            along, perpendicular = (
-                (fwd, lat) if direction == "forward"
-                else (lat, fwd)
-            )
-            groups[direction][int(round(along / 2.0))].append(
-                (perpendicular, width)
-            )
-
-    profiles: Dict[str, np.ndarray] = {}
-    for direction, bins in groups.items():
-        keys = sorted(bins)
-        runs: List[List[int]] = []
-        current: List[int] = []
-        for key in keys:
-            if current and key - current[-1] > 2:
-                runs.append(current)
-                current = []
-            current.append(key)
-        if current:
-            runs.append(current)
-        runs = [run for run in runs if (run[-1] - run[0]) * 2 >= 8]
-        if not runs:
-            continue
-        # Dominant corridor only. Minor alleys and disconnected lane
-        # stubs should not dominate this driver-facing local road view.
-        chosen = max(
-            runs,
-            key=lambda run: (run[-1] - run[0]) * 2 + min(len(run), 25),
-        )
-        rows = []
-        for key in chosen:
-            items = bins[key]
-            mid = float(np.median([value for value, _ in items]))
-            # Suppress isolated connector samples far from the street
-            # centre without erasing normal adjacent driving lanes.
-            items = [
-                (value, width)
-                for value, width in items if abs(value - mid) <= 8.5
-            ]
-            if not items:
-                continue
-            values = [value for value, _ in items]
-            half = float(np.median([width for _, width in items])) * 0.5
-            rows.append((
-                key * 2.0,
-                float(np.quantile(values, 0.10)) - half,
-                float(np.quantile(values, 0.90)) + half,
-            ))
-        if len(rows) < 4:
-            continue
-        raw = np.asarray(rows, dtype=float)
-        smooth = raw.copy()
-        for col in (1, 2):
-            for i in range(len(raw)):
-                smooth[i, col] = float(np.median(
-                    raw[max(0, i - 2):min(len(raw), i + 3), col]
-                ))
-        profiles[direction] = smooth
-
-    if not profiles:
-        return False
-
-    def nearest(direction: str, axis: float):
+    def street_center(direction: str, along: float) -> Optional[float]:
         profile = profiles.get(direction)
-        if profile is None:
+        if profile is None or along < profile[0, 0] or along > profile[-1, 0]:
             return None
-        if axis < profile[0, 0] - 3 or axis > profile[-1, 0] + 3:
-            return None
-        return (
-            float(np.interp(axis, profile[:, 0], profile[:, 1])),
-            float(np.interp(axis, profile[:, 0], profile[:, 2])),
-        )
+        return float(np.interp(along, profile[:, 0], profile[:, 1]))
 
-    painted = 0
+    count = 0
 
     def stroke(points: List[Tuple[float, float]]) -> None:
-        nonlocal painted
+        nonlocal count
         if len(points) < 2:
             return
-        coords = [
-            (int(project(lat, fwd)[0] - x0),
-             int(project(lat, fwd)[1] - y0))
-            for lat, fwd in points
-        ]
-        for a, b in zip(coords[:-1], coords[1:]):
-            cv2.line(layer, a, b, (78, 96, 112), 3, cv2.LINE_AA)
-            cv2.line(layer, a, b, (164, 175, 186), 1, cv2.LINE_AA)
-            painted += 1
+        coords = np.asarray(
+            [(project(lat, fwd)[0] - x0, project(lat, fwd)[1] - y0)
+             for lat, fwd in points], dtype=np.int32
+        )
+        cv2.polylines(layer, [coords], False, (75, 91, 107), 3, cv2.LINE_AA)
+        cv2.polylines(layer, [coords], False, (171, 181, 192), 1, cv2.LINE_AA)
+        count += len(points) - 1
 
     for direction, profile in profiles.items():
-        other = "cross" if direction == "forward" else "forward"
-        for boundary in (1, 2):
+        for side in (-1.0, 1.0):
             path: List[Tuple[float, float]] = []
-            for along, lo, hi in profile:
-                edge = lo if boundary == 1 else hi
-                crossing = nearest(other, float(edge))
-                internal = (
-                    crossing is not None
-                    and crossing[0] - 0.7 <= along <= crossing[1] + 0.7
+            for i, (along, center) in enumerate(profile):
+                prev = profile[max(0, i - 1)]
+                nxt = profile[min(len(profile) - 1, i + 1)]
+                delta = float(nxt[0] - prev[0])
+                slope = float(nxt[1] - prev[1]) / delta if delta else 0.0
+                norm = math.hypot(1.0, slope)
+                # Normal offset gives consistent visual width on curves.
+                perpendicular = float(
+                    center + side * HALF_STREET_WIDTH_M / norm
                 )
-                if internal:
+                shifted_along = float(
+                    along - side * HALF_STREET_WIDTH_M * slope / norm
+                )
+                if direction == "forward":
+                    lateral, forward = perpendicular, shifted_along
+                    cross = street_center("cross", lateral)
+                    within_junction = (
+                        cross is not None
+                        and abs(forward - cross) < HALF_STREET_WIDTH_M + 0.4
+                    )
+                else:
+                    lateral, forward = shifted_along, perpendicular
+                    main = street_center("forward", forward)
+                    within_junction = (
+                        main is not None
+                        and abs(lateral - main) < HALF_STREET_WIDTH_M + 0.4
+                    )
+                if within_junction:
                     stroke(path)
                     path = []
                 else:
-                    path.append(
-                        (float(edge), float(along))
-                        if direction == "forward"
-                        else (float(along), float(edge))
-                    )
+                    path.append((lateral, forward))
             stroke(path)
-
-    return painted > 0
+    return count > 0
