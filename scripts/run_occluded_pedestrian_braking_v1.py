@@ -26,6 +26,7 @@ from risk.risk_engine import RiskEngine, RiskConfig
 from control.braking_controller import BrakingController, BrakingConfig
 from metrics.collector import MetricsCollector
 from dashboard.data_layer import DashboardDataLayer
+from simulation.road_context import RoadContextSampler
 from validation.runtime import ValidationConfig, ValidationRunTracker
 
 
@@ -713,6 +714,17 @@ def main():
     dashboard_data_layer = DashboardDataLayer(
         max_timeline_events=20
     )
+
+    # Read-only road geometry for the Driver dashboard, separate from
+    # V2I / perception / risk / braking. Failure leaves the demo intact.
+    road_context_sampler = None
+    try:
+        road_context_sampler = RoadContextSampler(
+            world.get_map(), max_segments=180
+        )
+        print("CARLA road-context geometry cache ready")
+    except Exception as exc:
+        print(f"Road-context visualisation unavailable: {exc}")
 
     model_path = Path(YOLO_MODEL_PATH)
     model = YOLO(str(model_path) if model_path.exists() else "yolo26n.pt")
@@ -2084,8 +2096,17 @@ def main():
             # separate from the filtered dashboard timeline.
             # ------------------------------------------------
 
+            road_context = None
+            if road_context_sampler is not None:
+                try:
+                    road_context = road_context_sampler.snapshot(ego_state)
+                except Exception as exc:
+                    print(f"Road-context update unavailable: {exc}")
+                    road_context_sampler = None
+
             dashboard_snapshot = (
                 dashboard_data_layer.build_snapshot(
+                    road_context=road_context,
                     frame_id=onboard_frame_id,
                     sim_time_s=onboard_timestamp,
                     ego_state=ego_state,
