@@ -179,6 +179,66 @@ def relative_location(base_transform, forward=0.0, lateral=0.0, vertical=0.0):
     )
 
 
+def clear_stale_test_actors(client, world):
+    """
+    Remove dynamic actors left behind by an interrupted validation run.
+
+    The Perceptinet CARLA VM is a dedicated scenario environment. A hard
+    process termination can skip the script's finally block, leaving old
+    vehicles/walkers/cameras in the map. Those actors can make subsequent
+    try_spawn_actor() calls fail even though the scenario geometry is valid.
+    """
+
+    removable_prefixes = (
+        "vehicle.",
+        "walker.pedestrian.",
+        "sensor.camera.",
+        "controller.ai.walker",
+    )
+
+    stale_actors = [
+        actor
+        for actor in world.get_actors()
+        if actor.is_alive
+        and actor.type_id.startswith(removable_prefixes)
+    ]
+
+    if not stale_actors:
+        print("Stale actor cleanup: none")
+        return 0
+
+    commands = [
+        carla.command.DestroyActor(actor.id)
+        for actor in stale_actors
+    ]
+
+    responses = client.apply_batch_sync(
+        commands,
+        True,
+    )
+
+    failures = [
+        response.error
+        for response in responses
+        if response.error
+    ]
+
+    removed = len(stale_actors) - len(failures)
+
+    print(
+        "Stale actor cleanup: "
+        f"removed={removed}, failed={len(failures)}"
+    )
+
+    if failures:
+        raise RuntimeError(
+            "Failed to remove stale CARLA actors: "
+            + "; ".join(failures[:3])
+        )
+
+    return removed
+
+
 def spawn_first_available(world, blueprints, transforms, label):
     for blueprint in blueprints:
         for transform in transforms:
@@ -279,6 +339,28 @@ def main():
 
     print("Connected to CARLA")
     print("Map:", world.get_map().name)
+
+    # Recover the dedicated test world if a previous validation process was
+    # force-killed while CARLA was still in synchronous mode.
+    startup_settings = world.get_settings()
+
+    if startup_settings.synchronous_mode:
+        startup_settings.synchronous_mode = False
+        startup_settings.fixed_delta_seconds = None
+        world.apply_settings(startup_settings)
+
+        try:
+            client.get_trafficmanager(
+                TM_PORT
+            ).set_synchronous_mode(False)
+        except Exception:
+            pass
+
+        print("Recovered stale synchronous CARLA state")
+
+    # Hard-killed validation runs can also leave old Ego/truck/walker/camera
+    # actors behind. Remove them before constructing a fresh scenario.
+    clear_stale_test_actors(client, world)
 
     original_settings = world.get_settings()
     actors = []
