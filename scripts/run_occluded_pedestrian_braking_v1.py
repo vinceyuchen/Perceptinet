@@ -34,6 +34,12 @@ from validation.runtime import ValidationConfig, ValidationRunTracker
 EGO_TEST_SPEED_MPS = 4.0
 EGO_STOP_DISTANCE_M = 1.5
 
+# Let newly spawned dynamic actors settle onto the CARLA road surface before
+# freezing the deterministic demo geometry. This improves visual grounding
+# without changing the kinematic control model used by the validated pipeline.
+SCENE_GROUND_SETTLE_TICKS = 6
+SCENE_GROUND_MAX_XY_DRIFT_M = 0.35
+
 # Once the Ego Vehicle is fully stopped, require a short run
 # of stable NORMAL observations before releasing the safety latch.
 HAZARD_RELEASE_NORMAL_FRAMES = 10
@@ -79,7 +85,7 @@ OCCLUDER_LATERAL_OFFSET_M = 2.7
 
 PEDESTRIAN_FORWARD_FROM_OCCLUDER = 3.0
 
-# Relative to the truck. With a +2.4 m truck offset these
+# Relative to the truck. With a +2.7 m truck offset these
 # produce pedestrian lateral positions around +1.7 to +2.3 m
 # from the Ego path, still inside RiskEngine's 2.5 m corridor.
 PEDESTRIAN_LATERAL_OFFSETS = [-0.6, -0.8, -0.4, -1.0]
@@ -806,7 +812,6 @@ def main():
         )
 
         actors.append(ego_vehicle)
-        ego_vehicle.set_simulate_physics(False)
 
         occluder_transforms = []
 
@@ -837,7 +842,6 @@ def main():
         )
 
         actors.append(occluder_vehicle)
-        occluder_vehicle.set_simulate_physics(False)
 
         # ----------------------------------------------------
         # Verify that the truck no longer intersects the
@@ -927,6 +931,116 @@ def main():
         )
 
         actors.append(pedestrian)
+
+        # ----------------------------------------------------
+        # Visual grounding pass
+        #
+        # Vehicles are spawned with physics enabled for a few synchronous
+        # ticks so CARLA can settle them onto the road surface. We then freeze
+        # Ego and the occluding truck and refresh every transform used by the
+        # deterministic path/risk model.
+        # ----------------------------------------------------
+
+        pre_settle_ego = ego_vehicle.get_transform()
+        pre_settle_truck = occluder_vehicle.get_transform()
+        pre_settle_pedestrian = pedestrian.get_transform()
+
+        print(
+            "Ground settling scene | "
+            f"ticks={SCENE_GROUND_SETTLE_TICKS}"
+        )
+
+        for _ in range(SCENE_GROUND_SETTLE_TICKS):
+            world.tick()
+
+        ego_vehicle.set_simulate_physics(False)
+        occluder_vehicle.set_simulate_physics(False)
+
+        ego_transform = ego_vehicle.get_transform()
+        occluder_transform = occluder_vehicle.get_transform()
+        pedestrian_transform = pedestrian.get_transform()
+
+        def xy_drift(before, after):
+            return math.hypot(
+                after.location.x - before.location.x,
+                after.location.y - before.location.y,
+            )
+
+        ego_ground_drift_m = xy_drift(
+            pre_settle_ego,
+            ego_transform,
+        )
+        truck_ground_drift_m = xy_drift(
+            pre_settle_truck,
+            occluder_transform,
+        )
+        pedestrian_ground_drift_m = xy_drift(
+            pre_settle_pedestrian,
+            pedestrian_transform,
+        )
+
+        print(
+            "Ground settle result | "
+            f"ego_dz="
+            f"{ego_transform.location.z - pre_settle_ego.location.z:+.3f}m | "
+            f"truck_dz="
+            f"{occluder_transform.location.z - pre_settle_truck.location.z:+.3f}m | "
+            f"ped_dz="
+            f"{pedestrian_transform.location.z - pre_settle_pedestrian.location.z:+.3f}m | "
+            f"xy_drift=("
+            f"{ego_ground_drift_m:.3f}, "
+            f"{truck_ground_drift_m:.3f}, "
+            f"{pedestrian_ground_drift_m:.3f})m"
+        )
+
+        if max(
+            ego_ground_drift_m,
+            truck_ground_drift_m,
+            pedestrian_ground_drift_m,
+        ) > SCENE_GROUND_MAX_XY_DRIFT_M:
+            raise RuntimeError(
+                "Ground settling changed scenario XY geometry too much: "
+                f"ego={ego_ground_drift_m:.3f}m, "
+                f"truck={truck_ground_drift_m:.3f}m, "
+                f"pedestrian={pedestrian_ground_drift_m:.3f}m"
+            )
+
+        # Rebuild the Ego right vector from the settled heading so all
+        # geometry checks use the same final frame as motion and risk.
+        ego_right = ego_transform.get_right_vector()
+
+        settled_truck_dx = (
+            occluder_transform.location.x
+            - ego_transform.location.x
+        )
+        settled_truck_dy = (
+            occluder_transform.location.y
+            - ego_transform.location.y
+        )
+        settled_truck_lateral_m = (
+            settled_truck_dx * ego_right.x
+            + settled_truck_dy * ego_right.y
+        )
+        settled_truck_clearance_m = (
+            abs(settled_truck_lateral_m)
+            - ego_half_width_m
+            - truck_half_width_m
+        )
+
+        print(
+            "Settled truck path geometry | "
+            f"lateral={settled_truck_lateral_m:.2f}m | "
+            f"clearance={settled_truck_clearance_m:.2f}m"
+        )
+
+        if (
+            settled_truck_clearance_m
+            < TRUCK_PATH_CLEARANCE_MIN_M
+        ):
+            raise RuntimeError(
+                "Settled occluding truck intersects Ego path: "
+                f"clearance={settled_truck_clearance_m:.2f}m"
+            )
 
         pedestrian_dx = (
             pedestrian_transform.location.x
