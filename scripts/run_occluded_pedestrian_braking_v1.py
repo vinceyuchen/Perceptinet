@@ -712,6 +712,11 @@ def main():
             os.environ.get("PERCEPTINET_DEMO_CYCLE_INDEX", "1"),
         )
         print("TEACHER DEMO | Isolated cycle metrics:", results_dir)
+        dashboard_snapshot_path = Path(os.environ.get(
+            "PERCEPTINET_DEMO_SNAPSHOT_FILE",
+            str(dashboard_snapshot_path),
+        ))
+        dashboard_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         print("TEACHER DEMO | Live dashboard:", dashboard_snapshot_path)
     else:
         results_dir = REPO_ROOT / "results"
