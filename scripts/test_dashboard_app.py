@@ -147,8 +147,9 @@ def main():
 
     driver_frame = app.render(snapshot)
     assert driver_frame.shape == (900, 1600, 3)
-    # Driver Mode alone uses white/grey glass and monochrome typography.
-    assert driver_frame[20, 10, 0] >= 220
+    # Driver Mode is dark neutral glass, with strictly grayscale pixels.
+    assert driver_frame[20, 10, 0] < 70
+    assert driver_frame[300, 300, 0] < 95
     assert np.array_equal(driver_frame[:, :, 0], driver_frame[:, :, 1])
     assert np.array_equal(driver_frame[:, :, 1], driver_frame[:, :, 2])
 
@@ -175,7 +176,7 @@ def main():
     assert app.toggle_mode() == app.DRIVER_MODE
 
     print("=== Perceptinet Unified Dashboard Test ===")
-    print("Light grayscale Driver / unchanged dark Pro navigation: OK")
+    print("Dark grayscale Driver / unchanged dark Pro navigation: OK")
     print("Sharp typography / rounded panels: OK")
     print("Driver Mode render: OK")
     print("Pro Mode render: OK")
