@@ -119,7 +119,7 @@ def main():
                 "event_type": "hazard_transition",
                 "sim_time_s": 119.0,
                 "frame_id": 499966,
-                "previous_level": "CAUTION",
+                "old_level": "CAUTION",
                 "new_level": "WARNING",
             },
             {
@@ -140,6 +140,24 @@ def main():
     assert renderer.cycle_source(snapshot) == "onboard"
     assert renderer.cycle_source(snapshot) == "RSU-01"
 
+    assert renderer._timeline_detail(
+        snapshot["timeline"][1]
+    ) == "CAUTION -> WARNING"
+
+    first_source = renderer._first_detection_source(snapshot)
+    assert first_source == "RSU-01"
+
+    forward_max, lateral_half = renderer._fused_view_limits(snapshot)
+    assert forward_max == 30.0
+    assert lateral_half >= 4.0
+
+    normal_primary = renderer._object_color(
+        snapshot["fusion"]["objects"][0],
+        is_primary=True,
+        hazard_level="NORMAL",
+    )
+    assert normal_primary == BLUE
+
     frame = renderer.render(snapshot)
 
     assert frame.shape == (900, 1600, 3)
@@ -151,7 +169,10 @@ def main():
     print("Source inspector: ALL / onboard / RSU-01")
     print("Active contributor: RSU-01")
     print("Latency panel: OK")
-    print("Event timeline: OK")
+    print("Event timeline old/new levels: OK")
+    print("First detection source: RSU-01")
+    print("Dynamic fused-world scale: OK")
+    print("NORMAL primary hazard color: non-red")
     print("PRO MODE TEST PASSED")
 
 
