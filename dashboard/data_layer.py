@@ -339,6 +339,39 @@ class DashboardDataLayer:
         }
 
     @staticmethod
+    def write_snapshot_json(
+        snapshot: Dict[str, Any],
+        path: Any,
+    ) -> Path:
+        """
+        Atomically publish the latest live dashboard snapshot.
+
+        The temporary-file replace prevents a UI reader from
+        observing a partially written JSON document.
+        """
+        snapshot_path = Path(path)
+        snapshot_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        temporary_path = snapshot_path.with_suffix(
+            snapshot_path.suffix + ".tmp"
+        )
+
+        temporary_path.write_text(
+            json.dumps(
+                snapshot,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        temporary_path.replace(snapshot_path)
+        return snapshot_path
+
+    @staticmethod
     def load_metrics_summary(path: Any) -> Dict[str, Any]:
         metrics_path = Path(path)
 
