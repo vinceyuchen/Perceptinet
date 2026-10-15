@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -390,49 +392,49 @@ class DashboardDataLayer:
         snapshot: Dict[str, Any],
         path: Any,
     ) -> Path:
-        """
-        Atomically publish the latest live dashboard snapshot.
+        """Publish complete JSON snapshots atomically with Windows-safe retries.
 
-        The temporary-file replace prevents a UI reader from
-        observing a partially written JSON document.
+        A unique temporary file prevents collisions between writer processes.
+        Replacement may briefly be refused when a Windows reader has opened
+        the previous snapshot without FILE_SHARE_DELETE; release/retry rather
+        than allowing the Dashboard to observe a partial JSON payload.
         """
         snapshot_path = Path(path)
-        snapshot_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
 
-        temporary_path = snapshot_path.with_suffix(
-            snapshot_path.suffix + ".tmp"
-        )
+        temporary_path = None
+        try:
+            # The named file is closed before os.replace on Windows.
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                prefix=snapshot_path.name + ".",
+                suffix=".tmp",
+                dir=str(snapshot_path.parent),
+                encoding="utf-8",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                json.dump(snapshot, temporary, indent=2, sort_keys=True)
 
-        temporary_path.write_text(
-            json.dumps(
-                snapshot,
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
+            # Reader locks may span multiple render cycles. Retry for a
+            # bounded interval; all errors remain observable to the caller.
+            for attempt in range(80):
+                try:
+                    os.replace(temporary_path, snapshot_path)
+                    return snapshot_path
+                except PermissionError:
+                    if attempt == 79:
+                        raise
+                    time.sleep(0.025)
 
-        last_error = None
-
-        # On Windows, os.replace() can transiently fail with
-        # WinError 5 while the dashboard reader has the current
-        # snapshot open. Retry briefly instead of crashing the
-        # live CARLA pipeline.
-        for attempt in range(40):
-            try:
-                temporary_path.replace(snapshot_path)
-                return snapshot_path
-            except PermissionError as exc:
-                last_error = exc
-                time.sleep(0.01)
-
-        if last_error is not None:
-            raise last_error
-
-        return snapshot_path
+            raise RuntimeError("Snapshot publication did not complete")
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    # Failed atomic publication should never mask its cause.
+                    pass
 
     @staticmethod
     def load_metrics_summary(path: Any) -> Dict[str, Any]:
