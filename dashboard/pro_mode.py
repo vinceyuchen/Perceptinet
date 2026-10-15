@@ -205,18 +205,19 @@ class ProModeRenderer:
 
         self._put_text(
             canvas,
-            "PERCEPTINET",
-            (24, 35),
-            scale=0.82,
+            "ENGINEERING VIEW",
+            (24, 36),
+            scale=0.70,
+            color=BLUE,
             thickness=2,
         )
         self._put_text(
             canvas,
-            "PRO MODE",
-            (24, 63),
-            scale=0.5,
-            color=BLUE,
-            thickness=2,
+            "FUSED WORLD / PIPELINE DIAGNOSTICS",
+            (24, 62),
+            scale=0.40,
+            color=MUTED,
+            thickness=1,
         )
 
         frame_id = snapshot.get("frame_id")
@@ -315,6 +316,179 @@ class ProModeRenderer:
 
         return longitudinal, lateral
 
+    def _fused_view_limits(
+        self,
+        snapshot: Dict[str, Any],
+    ) -> Tuple[float, float]:
+        """
+        Choose a useful engineering scale from the currently visible fused
+        objects instead of always forcing a fixed 40 m / +/-10 m view.
+        """
+        longitudinal_values: List[float] = []
+        lateral_values: List[float] = []
+
+        for obj in (
+            (snapshot.get("fusion") or {}).get("objects", [])
+            or []
+        ):
+            if not self._object_visible_for_source(obj):
+                continue
+
+            rel = self._relative_xy(snapshot, obj)
+            if rel is None:
+                continue
+
+            longitudinal, lateral = rel
+
+            if longitudinal < -2.0:
+                continue
+
+            longitudinal_values.append(max(0.0, longitudinal))
+            lateral_values.append(abs(lateral))
+
+        farthest = max(longitudinal_values, default=10.0)
+        widest = max(lateral_values, default=2.0)
+
+        if farthest <= 10.0:
+            forward_max = 15.0
+        elif farthest <= 15.0:
+            forward_max = 20.0
+        elif farthest <= 25.0:
+            forward_max = 30.0
+        else:
+            forward_max = 40.0
+
+        lateral_half = max(
+            4.0,
+            min(
+                10.0,
+                math.ceil((widest + 1.0) / 2.0) * 2.0,
+            ),
+        )
+
+        return forward_max, lateral_half
+
+    @staticmethod
+    def _first_detection_source(
+        snapshot: Dict[str, Any],
+    ) -> Optional[str]:
+        detection = (
+            (snapshot.get("metrics") or {}).get("detection")
+            or {}
+        )
+        sources = detection.get("sources") or {}
+
+        candidates: List[Tuple[float, str]] = []
+
+        for source, details in sources.items():
+            if not isinstance(details, dict):
+                continue
+
+            when = ProModeRenderer._number(
+                details.get("first_stable_time_s")
+            )
+
+            if when is not None:
+                candidates.append((when, str(source)))
+
+        if not candidates:
+            # Backward-compatible fallback for the current Metrics v1
+            # summary, which separately exposes the earliest RSU.
+            source = detection.get("earliest_rsu_source")
+            return None if source is None else str(source)
+
+        return min(candidates, key=lambda item: item[0])[1]
+
+    @staticmethod
+    def _object_color(
+        obj: Dict[str, Any],
+        *,
+        is_primary: bool,
+        hazard_level: str,
+    ) -> Tuple[int, int, int]:
+        level = str(hazard_level).upper()
+
+        if is_primary and level != "NORMAL":
+            return HAZARD_COLORS.get(level, WHITE)
+
+        sources = {
+            str(source)
+            for source in (obj.get("sources") or [])
+        }
+
+        if any(source.startswith("RSU") for source in sources):
+            return BLUE
+
+        return WHITE
+
+    def _label_origin(
+        self,
+        *,
+        px: int,
+        py: int,
+        label: str,
+        sources: str,
+        plot_left: int,
+        plot_top: int,
+        plot_right: int,
+        plot_bottom: int,
+        occupied: List[Tuple[int, int, int, int]],
+    ) -> Tuple[int, int]:
+        label_size, _ = cv2.getTextSize(
+            label,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            1,
+        )
+        source_size, _ = cv2.getTextSize(
+            sources,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.30,
+            1,
+        )
+
+        width = max(label_size[0], source_size[0]) + 10
+        height = 32
+
+        candidates = [
+            (px + 15, py - 8),
+            (px + 15, py + 30),
+            (px - width - 15, py - 8),
+            (px - width - 15, py + 30),
+            (px + 15, py - 34),
+            (px - width - 15, py - 34),
+        ]
+
+        for tx, ty in candidates:
+            tx = max(plot_left + 4, min(tx, plot_right - width - 4))
+            ty = max(plot_top + height, min(ty, plot_bottom - 4))
+
+            rect = (
+                tx - 4,
+                ty - 20,
+                tx + width,
+                ty + 12,
+            )
+
+            overlaps = any(
+                not (
+                    rect[2] < other[0]
+                    or rect[0] > other[2]
+                    or rect[3] < other[1]
+                    or rect[1] > other[3]
+                )
+                for other in occupied
+            )
+
+            if not overlaps:
+                occupied.append(rect)
+                return tx, ty
+
+        tx = max(plot_left + 4, min(px + 15, plot_right - width - 4))
+        ty = max(plot_top + height, min(py - 8, plot_bottom - 4))
+        occupied.append((tx - 4, ty - 20, tx + width, ty + 12))
+        return tx, ty
+
     def _draw_fused_world(
         self,
         canvas: np.ndarray,
@@ -325,6 +499,10 @@ class ProModeRenderer:
 
         fused = snapshot.get("fusion") or {}
         objects = fused.get("objects", []) or []
+        hazard = snapshot.get("hazard") or {}
+        hazard_level = str(
+            hazard.get("control_level", "NORMAL")
+        ).upper()
 
         self._put_text(
             canvas,
@@ -333,11 +511,21 @@ class ProModeRenderer:
             scale=0.62,
             thickness=2,
         )
+
+        forward_max, lateral_half = self._fused_view_limits(
+            snapshot
+        )
+
         self._put_text(
             canvas,
-            f"{len(objects)} objects | source filter: {self.selected_source}",
+            (
+                f"{len(objects)} objects | "
+                f"filter: {self.selected_source} | "
+                f"view: 0-{forward_max:.0f} m / "
+                f"+/-{lateral_half:.0f} m"
+            ),
             (45, 165),
-            scale=0.45,
+            scale=0.42,
             color=MUTED,
         )
 
@@ -345,11 +533,19 @@ class ProModeRenderer:
         plot_right, plot_bottom = 995, 655
         center_x = (plot_left + plot_right) // 2
 
-        # Engineering grid: +/- 10 m lateral, 0..40 m longitudinal.
-        for lateral in range(-10, 11, 5):
+        # Dynamic engineering grid.
+        lateral_ticks = [
+            -lateral_half,
+            -lateral_half / 2.0,
+            0.0,
+            lateral_half / 2.0,
+            lateral_half,
+        ]
+
+        for lateral in lateral_ticks:
             px = int(
                 center_x
-                + (lateral / 10.0)
+                + (lateral / lateral_half)
                 * ((plot_right - plot_left) / 2.0)
             )
             cv2.line(
@@ -361,17 +557,17 @@ class ProModeRenderer:
             )
             self._put_text(
                 canvas,
-                f"{lateral:+d}m",
+                f"{lateral:+.0f}m",
                 (px - 18, plot_bottom + 20),
                 scale=0.34,
                 color=MUTED,
             )
 
-        for longitudinal in range(0, 41, 10):
+        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0]:
+            longitudinal = forward_max * fraction
             py = int(
                 plot_bottom
-                - (longitudinal / 40.0)
-                * (plot_bottom - plot_top)
+                - fraction * (plot_bottom - plot_top)
             )
             cv2.line(
                 canvas,
@@ -382,7 +578,7 @@ class ProModeRenderer:
             )
             self._put_text(
                 canvas,
-                f"{longitudinal}m",
+                f"{longitudinal:.0f}m",
                 (plot_left + 5, py - 5),
                 scale=0.34,
                 color=MUTED,
@@ -404,16 +600,23 @@ class ProModeRenderer:
             color=WHITE,
         )
 
-        primary = (
-            (snapshot.get("hazard") or {}).get("primary")
-        )
+        primary = hazard.get("primary")
         primary_actor = (
             primary.get("actor_id")
             if primary
             else None
         )
 
-        plotted = 0
+        points: List[
+            Tuple[
+                float,
+                float,
+                int,
+                int,
+                Dict[str, Any],
+                bool,
+            ]
+        ] = []
 
         for obj in objects:
             if not self._object_visible_for_source(obj):
@@ -427,19 +630,19 @@ class ProModeRenderer:
 
             if (
                 longitudinal < 0.0
-                or longitudinal > 40.0
-                or abs(lateral) > 10.0
+                or longitudinal > forward_max
+                or abs(lateral) > lateral_half
             ):
                 continue
 
             px = int(
                 center_x
-                + (lateral / 10.0)
+                + (lateral / lateral_half)
                 * ((plot_right - plot_left) / 2.0)
             )
             py = int(
                 plot_bottom
-                - (longitudinal / 40.0)
+                - (longitudinal / forward_max)
                 * (plot_bottom - plot_top)
             )
 
@@ -448,7 +651,35 @@ class ProModeRenderer:
                 and obj.get("actor_id") == primary_actor
             )
 
-            color = RED if is_primary else BLUE
+            points.append(
+                (
+                    longitudinal,
+                    lateral,
+                    px,
+                    py,
+                    obj,
+                    is_primary,
+                )
+            )
+
+        # Draw nearest objects last so labels remain readable.
+        points.sort(key=lambda item: item[0], reverse=True)
+
+        occupied: List[Tuple[int, int, int, int]] = []
+
+        for (
+            longitudinal,
+            lateral,
+            px,
+            py,
+            obj,
+            is_primary,
+        ) in points:
+            color = self._object_color(
+                obj,
+                is_primary=is_primary,
+                hazard_level=hazard_level,
+            )
             radius = 13 if is_primary else 9
 
             cv2.circle(
@@ -475,28 +706,46 @@ class ProModeRenderer:
             if confidence is not None:
                 label += f" {confidence:.2f}"
 
+            sources = ",".join(
+                self._object_sources(obj)
+            )
+
+            tx, ty = self._label_origin(
+                px=px,
+                py=py,
+                label=label,
+                sources=sources,
+                plot_left=plot_left,
+                plot_top=plot_top,
+                plot_right=plot_right,
+                plot_bottom=plot_bottom,
+                occupied=occupied,
+            )
+
+            cv2.line(
+                canvas,
+                (px, py),
+                (tx - 3, ty - 5),
+                color,
+                1,
+            )
+
             self._put_text(
                 canvas,
                 label,
-                (px + 15, py - 2),
+                (tx, ty),
                 scale=0.38,
                 color=color,
-            )
-
-            sources = ",".join(
-                self._object_sources(obj)
             )
             self._put_text(
                 canvas,
                 sources,
-                (px + 15, py + 15),
+                (tx, ty + 15),
                 scale=0.30,
                 color=MUTED,
             )
 
-            plotted += 1
-
-        if plotted == 0:
+        if not points:
             self._put_text(
                 canvas,
                 "No fused objects in current view/filter",
@@ -530,6 +779,7 @@ class ProModeRenderer:
             if primary
             else set()
         )
+        first_source = self._first_detection_source(snapshot)
 
         y = 175
 
@@ -568,13 +818,21 @@ class ProModeRenderer:
                 thickness=2 if selected else 1,
             )
 
+            badges: List[str] = []
+
+            if source == first_source:
+                badges.append("FIRST DETECTION")
+
             if contributor:
+                badges.append("CONTRIBUTOR")
+
+            if badges:
                 self._put_text(
                     canvas,
-                    "ACTIVE CONTRIBUTOR",
-                    (1360, y),
-                    scale=0.34,
-                    color=AMBER,
+                    " | ".join(badges),
+                    (1325, y),
+                    scale=0.30,
+                    color=AMBER if source == first_source else BLUE,
                     thickness=2,
                 )
 
@@ -582,7 +840,7 @@ class ProModeRenderer:
 
         self._put_text(
             canvas,
-            "TAB: cycle source",
+            "TAB: cycle source filter",
             (1080, 292),
             scale=0.38,
             color=MUTED,
@@ -655,9 +913,23 @@ class ProModeRenderer:
         ego = snapshot.get("ego") or {}
         hazard = snapshot.get("hazard") or {}
         braking = snapshot.get("braking") or {}
+        primary = hazard.get("primary") or {}
 
         speed = self._number(ego.get("speed_mps"), 0.0) or 0.0
+        target = self._number(braking.get("target_speed_mps"))
         decel = self._number(braking.get("deceleration_mps2"), 0.0) or 0.0
+        ttc = self._number(primary.get("ttc_s"))
+
+        target_text = (
+            "N/A"
+            if target is None
+            else f"{target:.2f}"
+        )
+        ttc_text = (
+            "N/A"
+            if ttc is None
+            else f"{ttc:.2f}s"
+        )
 
         self._put_text(
             canvas,
@@ -669,15 +941,22 @@ class ProModeRenderer:
 
         self._put_text(
             canvas,
-            f"Speed {speed:.2f} m/s",
-            (1080, 630),
-            scale=0.42,
+            (
+                f"Speed {speed:.2f} m/s | "
+                f"target {target_text} m/s | TTC {ttc_text}"
+            ),
+            (1080, 628),
+            scale=0.38,
         )
         self._put_text(
             canvas,
-            f"Brake {braking.get('state', 'N/A')} | decel {decel:.2f} m/s^2",
-            (1080, 653),
-            scale=0.40,
+            (
+                f"Brake {braking.get('state', 'N/A')} | "
+                f"active={bool(braking.get('active'))} | "
+                f"decel {decel:.2f} m/s^2"
+            ),
+            (1080, 652),
+            scale=0.36,
         )
         self._put_text(
             canvas,
@@ -688,7 +967,7 @@ class ProModeRenderer:
                 f"{hazard.get('control_level', 'NORMAL')}"
             ),
             (1080, 676),
-            scale=0.39,
+            scale=0.38,
             color=MUTED,
         )
 
@@ -697,23 +976,42 @@ class ProModeRenderer:
         event_type = str(event.get("event_type", ""))
 
         if event_type == "hazard_transition":
-            return (
-                f"{event.get('previous_level', '?')}"
-                f" -> {event.get('new_level', '?')}"
+            old_level = (
+                event.get("old_level")
+                or event.get("previous_level")
+                or "?"
             )
+            new_level = event.get("new_level") or "?"
+            return f"{old_level} -> {new_level}"
 
         if event_type == "stable_detection":
             source = event.get("source_id") or event.get("source")
             return f"source={source}"
 
         if event_type == "brake_trigger":
-            distance = event.get("distance_m")
-            ttc = event.get("ttc_s")
-            return f"distance={distance}m TTC={ttc}s"
+            distance = ProModeRenderer._number(
+                event.get("distance_m")
+            )
+            ttc = ProModeRenderer._number(
+                event.get("ttc_s")
+            )
+            distance_text = (
+                "N/A" if distance is None else f"{distance:.2f}m"
+            )
+            ttc_text = (
+                "N/A" if ttc is None else f"{ttc:.2f}s"
+            )
+            return f"distance={distance_text} TTC={ttc_text}"
 
         if event_type == "vehicle_stopped":
-            clearance = event.get("final_clearance_m")
-            return f"clearance={clearance}m"
+            clearance = ProModeRenderer._number(
+                event.get("final_clearance_m")
+            )
+            return (
+                "clearance=N/A"
+                if clearance is None
+                else f"clearance={clearance:.2f}m"
+            )
 
         return ""
 
@@ -783,7 +1081,7 @@ class ProModeRenderer:
             detail = self._timeline_detail(event)
 
             event_color = (
-                RED
+                GREEN
                 if event_type == "vehicle_stopped"
                 else AMBER
                 if event_type in {
