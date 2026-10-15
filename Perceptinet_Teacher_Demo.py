@@ -245,8 +245,11 @@ def main(argv=None) -> int:
             CYCLE_FILE.unlink(missing_ok=True)
             env = os.environ.copy()
             # Demo lifecycle overrides any inherited evaluation/validation mode.
+            env.pop("PERCEPTINET_VALIDATION", None)
             env.pop("PERCEPTINET_VALIDATION_MODE", None)
             env.pop("PERCEPTINET_VALIDATION_RUN_ID", None)
+            env.pop("PERCEPTINET_VALIDATION_HEADLESS", None)
+            env.pop("PERCEPTINET_VALIDATION_AUTO_EXIT", None)
             env["PERCEPTINET_TEACHER_DEMO"] = "1"
             env["PERCEPTINET_DEMO_STOP_FILE"] = str(STOP_FILE)
             env["PERCEPTINET_DEMO_CYCLE_FILE"] = str(CYCLE_FILE)
