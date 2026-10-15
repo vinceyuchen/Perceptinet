@@ -89,13 +89,55 @@ def main():
     assert frame.dtype.name == "uint8"
     assert frame.mean() > 0.0
 
-    # v6.8 is intentionally grayscale: no blue/green/orange pixels.
+    # Semantic green/yellow/red is now intentionally used for states,
+    # while the background and road geometry remain graphite grayscale.
     import numpy as np
-    assert np.array_equal(frame[:, :, 0], frame[:, :, 1])
-    assert np.array_equal(frame[:, :, 1], frame[:, :, 2])
+    from unittest.mock import patch
+    assert np.array_equal(frame[300, 80], np.repeat(frame[300, 80, 0], 3))
+    assert np.array_equal(frame[320, 1050], np.repeat(frame[320, 1050, 0], 3))
     assert 15 <= frame[300, 80, 0] < 90   # Dark Road Map glass
     assert 15 <= frame[320, 1050, 0] < 90  # Dark response card
     assert np.max(frame[50:84, 52:300]) >= 210  # Bright ROAD MAP title
+
+    safe = renderer._hazard_color("NORMAL")
+    caution = renderer._hazard_color("CAUTION")
+    warning = renderer._hazard_color("WARNING")
+    critical_color = renderer._hazard_color("CRITICAL")
+    # BGR channel ranking confirms green -> yellow -> red.
+    assert safe[1] > safe[2] and safe[1] > safe[0]
+    assert caution[1] > caution[0] and caution[2] > caution[0]
+    assert warning[2] > warning[1] and warning[2] > warning[0]
+    assert critical_color[2] >= critical_color[0]
+    assert renderer._vehicle_state_color("DRIVING", stale=False) == safe
+    assert renderer._vehicle_state_color("STOPPED", stale=False) == safe
+    assert renderer._vehicle_state_color("SLOWING", stale=False) == caution
+    assert renderer._vehicle_state_color("EMERGENCY BRAKING", stale=False) == critical_color
+    assert renderer._vehicle_state_color("EMERGENCY BRAKING", stale=True) == (178, 178, 178)
+
+    # Label-free road map: no EGO/CAR/PEDESTRIAN text beside markers.
+    with patch.object(renderer, "_put_text", wraps=renderer._put_text) as text_spy:
+        road_frame = renderer._base_canvas.copy()
+        renderer._draw_road(road_frame, snapshot, stale=False)
+        map_labels = [call.args[1] for call in text_spy.call_args_list]
+    assert "ROAD MAP" in map_labels
+    assert not any(label in map_labels for label in (
+        "EGO", "CAR", "TRUCK", "BUS", "MOTORCYCLE", "BICYCLE",
+        "PEDESTRIAN", "RSU-01", "NO TRACKED OBJECTS"
+    )), map_labels
+
+    # Exact source class chooses the corresponding uploaded SVG icon.
+    with patch("dashboard.driver_mode.draw_icon", wraps=__import__(
+        "dashboard.object_icon_assets", fromlist=["draw_icon"]
+    ).draw_icon) as icon_spy:
+        hazard_frame = renderer._base_canvas.copy()
+        renderer._draw_hazard(hazard_frame, snapshot, stale=False)
+        assert any(call.args[2] == "PEDESTRIAN"
+                   for call in icon_spy.call_args_list)
+        icon_spy.reset_mock()
+        no_primary = copy.deepcopy(snapshot)
+        no_primary["hazard"]["primary"]["longitudinal_m"] = 0.0
+        renderer._draw_hazard(renderer._base_canvas.copy(), no_primary, stale=False)
+        assert not icon_spy.called
 
     critical = dict(snapshot)
     critical["hazard"] = dict(snapshot["hazard"])
@@ -218,7 +260,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
-    print("v6.9 dark grayscale glass and CARLA road layout: OK")
+    print("v7.1 target-first cards, map label cleanup, status colors: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
