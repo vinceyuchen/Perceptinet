@@ -17,7 +17,9 @@ import numpy as np
 
 
 # Fixed schematic width, independent of sampled CARLA lane widths.
-HALF_STREET_WIDTH_M = 4.5
+# Slightly wider *visual* road tube at the v6.6 camera framing.
+# This remains independent of the CARLA lane width in metres.
+HALF_STREET_WIDTH_M = 5.3
 SAMPLE_BIN_M = 2.0
 MIN_ROAD_SPAN_M = 12.0
 
@@ -160,7 +162,7 @@ def draw_road_corridors(
             [(project(lat, fwd)[0] - x0, project(lat, fwd)[1] - y0)
              for lat, fwd in points], dtype=np.int32
         )
-        cv2.polylines(layer, [coords], False, (75, 91, 107), 3, cv2.LINE_AA)
+        cv2.polylines(layer, [coords], False, (75, 91, 107), 4, cv2.LINE_AA)
         cv2.polylines(layer, [coords], False, (171, 181, 192), 1, cv2.LINE_AA)
         count += len(points) - 1
 
