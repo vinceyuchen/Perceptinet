@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -368,7 +369,23 @@ class DashboardDataLayer:
             encoding="utf-8",
         )
 
-        temporary_path.replace(snapshot_path)
+        last_error = None
+
+        # On Windows, os.replace() can transiently fail with
+        # WinError 5 while the dashboard reader has the current
+        # snapshot open. Retry briefly instead of crashing the
+        # live CARLA pipeline.
+        for attempt in range(40):
+            try:
+                temporary_path.replace(snapshot_path)
+                return snapshot_path
+            except PermissionError as exc:
+                last_error = exc
+                time.sleep(0.01)
+
+        if last_error is not None:
+            raise last_error
+
         return snapshot_path
 
     @staticmethod
