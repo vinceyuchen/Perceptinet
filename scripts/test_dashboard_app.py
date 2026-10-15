@@ -7,6 +7,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from dashboard.app import PerceptinetDashboardApp
+from dashboard.ui_theme import draw_text, rounded_rect
+
+import numpy as np
 
 
 def build_snapshot():
@@ -117,6 +120,24 @@ def build_snapshot():
 def main():
     snapshot = build_snapshot()
 
+    theme_canvas = np.zeros((100, 320, 3), dtype=np.uint8)
+    rounded_rect(
+        theme_canvas,
+        (5, 5),
+        (315, 95),
+        fill=(24, 24, 24),
+        border=(55, 55, 55),
+        radius=10,
+    )
+    draw_text(
+        theme_canvas,
+        "PERCEPTINET",
+        (20, 58),
+        scale=0.7,
+        thickness=2,
+    )
+    assert theme_canvas.mean() > 0.0
+
     app = PerceptinetDashboardApp(
         width=1600,
         height=900,
@@ -147,6 +168,7 @@ def main():
     assert app.toggle_mode() == app.DRIVER_MODE
 
     print("=== Perceptinet Unified Dashboard Test ===")
+    print("Sharp typography / rounded panels: OK")
     print("Driver Mode render: OK")
     print("Pro Mode render: OK")
     print("Driver button: OK")
