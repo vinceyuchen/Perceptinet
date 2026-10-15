@@ -58,10 +58,12 @@ def main():
 
     # The main road uses fixed +/-4.5m edges, independent of the number
     # and actual widths of sampled CARLA driving lanes.
-    assert np.any(frame[334:346, 381:389])
-    assert np.any(frame[334:346, 471:479])
-    assert np.any(frame[429:438, 300:316])
-    assert np.any(frame[532:544, 570:584])
+    # The v6.6 tube is visually wider, while remaining independent
+    # of the sampled CARLA lane widths.
+    assert np.any(frame[326:349, 367:387])
+    assert np.any(frame[326:349, 473:493])
+    assert np.any(frame[416:449, 293:323])
+    assert np.any(frame[526:546, 564:588])
     # No road interior, terrain or junction line crossing.
     assert not np.any(frame[488, 430])
     assert not np.any(frame[488, 385])
