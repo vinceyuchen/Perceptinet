@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
+from .road_corridors import draw_road_corridors
 from .presentation_state import derive_presentation_state
 from .ui_theme import (
     BACKGROUND,
@@ -267,105 +268,17 @@ class DriverModeRenderer:
     def _draw_context_roads(
         self, canvas: np.ndarray, road_context: Any
     ) -> bool:
-        """Draw road outlines from a union of sampled CARLA lane footprints.
-
-        The binary geometry mask is an intermediate construction only.
-        Road pixels are not filled into the rendered glass dashboard.
-        """
+        """Only street boundary pairs; never an outlined union of lanes."""
         if not isinstance(road_context, dict):
             return False
         if (road_context.get("coordinate_frame")
                 != "ego_relative_lateral_forward_m"):
             return False
-        segments = road_context.get("segments")
-        if not isinstance(segments, list) or not segments:
-            return False
-
-        ox, oy, right, bottom = 54, 142, 800, 682
-        layer = canvas[oy:bottom, ox:right]
-        height, width = layer.shape[:2]
-        mask = np.zeros((height, width), dtype=np.uint8)
-        count = 0
-
-        for segment in segments[:400]:
-            if not isinstance(segment, dict):
-                continue
-            points = segment.get("points")
-            if not isinstance(points, list) or len(points) != 2:
-                continue
-            try:
-                a, b = points
-                lat_a, fwd_a = float(a[0]), float(a[1])
-                lat_b, fwd_b = float(b[0]), float(b[1])
-                lane_width = float(segment.get("width_m", 3.5))
-            except (ValueError, TypeError, IndexError, KeyError):
-                continue
-            if not all(math.isfinite(value) for value in (
-                    lat_a, fwd_a, lat_b, fwd_b, lane_width)):
-                continue
-            if not 0.5 <= lane_width <= 12.0:
-                continue
-
-            p0 = self._road_projection(lat_a, fwd_a)
-            p1 = self._road_projection(lat_b, fwd_b)
-            ax, ay = float(p0[0]-ox), float(p0[1]-oy)
-            bx, by = float(p1[0]-ox), float(p1[1]-oy)
-            vx, vy = bx-ax, by-ay
-            length = math.hypot(vx, vy)
-            if length < 0.75:
-                continue
-            ux, uy = vx/length, vy/length
-            nx, ny = -uy, ux
-
-            # Flat-ended strips have no per-waypoint circle caps. Extend
-            # endpoints slightly to bridge normal CARLA sampling gaps.
-            extension = min(5.0, length*0.18)
-            half = lane_width * 5.05
-            sx, sy = ax-ux*extension, ay-uy*extension
-            ex, ey = bx+ux*extension, by+uy*extension
-            quad = np.rint([
-                [sx+nx*half, sy+ny*half],
-                [sx-nx*half, sy-ny*half],
-                [ex-nx*half, ey-ny*half],
-                [ex+nx*half, ey+ny*half],
-            ]).astype(np.int32)
-            cv2.fillConvexPoly(mask, quad, 255, lineType=cv2.LINE_8)
-            count += 1
-
-        if not count or cv2.countNonZero(mask) == 0:
-            return False
-
-        # Merge neighboring strips and soften jagged 3-m sampling joins.
-        mask = cv2.morphologyEx(
-            mask, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+        return draw_road_corridors(
+            canvas,
+            road_context.get("segments"),
+            self._road_projection,
         )
-        mask = cv2.GaussianBlur(mask, (7, 7), 1.7)
-        _, mask = cv2.threshold(mask, 112, 255, cv2.THRESH_BINARY)
-
-        # Extract only street edges from the merged lane footprint.
-        # No roadway fill, parcel, terrain or building decoration.
-        # A merged contour removes duplicate internal lane boundaries at
-        # junctions, leaving two continuous banks along each street.
-        contours, _ = cv2.findContours(
-            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-        painted = 0
-        for contour in contours:
-            if cv2.contourArea(contour) < 90:
-                continue
-            # Reduce 3-m waypoint stepping without changing topology.
-            outline = cv2.approxPolyDP(contour, 2.0, True)
-            cv2.polylines(
-                layer, [outline], True, (82, 94, 109), 3,
-                cv2.LINE_AA,
-            )
-            cv2.polylines(
-                layer, [outline], True, (165, 172, 181), 1,
-                cv2.LINE_AA,
-            )
-            painted += 1
-        return painted > 0
 
     def _draw_detected_objects(
         self, canvas: np.ndarray, snapshot: Dict[str, Any],
@@ -472,7 +385,7 @@ class DriverModeRenderer:
                        scale=0.87, color=WHITE, thickness=2)
         self._put_text(
             canvas,
-            "CARLA WAYPOINT ROAD VIEW" if map_available
+            "CARLA ROAD CORRIDORS / SCHEMATIC" if map_available
             else "EGO-RELATIVE ROAD SCHEMATIC",
             (55, 102), scale=0.37, color=MUTED, thickness=1,
         )
