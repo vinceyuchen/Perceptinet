@@ -287,7 +287,7 @@ class DriverModeRenderer:
                 panel,
                 (start[0] - left, start[1] - top),
                 (end[0] - left, end[1] - top),
-                (149, 156, 164), 2, cv2.LINE_AA,
+                (98, 98, 98), 2, cv2.LINE_AA,
             )
 
     def _draw_context_roads(
