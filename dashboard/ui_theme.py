@@ -9,6 +9,44 @@ import numpy as np
 Color = Tuple[int, int, int]
 
 
+# ---------------------------------------------------------------------------
+# Perceptinet "Graphite" palette
+#
+# A restrained automotive dark theme inspired by premium EV interfaces:
+# neutral graphite surfaces carry the hierarchy, while colour is reserved
+# for meaning (cooperative perception, health, caution and critical hazards).
+# OpenCV uses BGR tuples.
+# ---------------------------------------------------------------------------
+
+BACKGROUND = (15, 15, 16)
+NAV = (20, 20, 22)
+
+SURFACE_1 = (24, 24, 26)
+SURFACE_2 = (30, 30, 33)
+SURFACE_3 = (38, 38, 42)
+
+BORDER = (54, 54, 59)
+BORDER_SOFT = (43, 43, 47)
+GRID = (57, 57, 62)
+
+TEXT_PRIMARY = (241, 241, 243)
+TEXT_SECONDARY = (177, 177, 183)
+TEXT_TERTIARY = (112, 112, 120)
+
+# Desaturated steel-blue. Reserved for cooperative perception / selected data.
+COOPERATIVE = (166, 145, 112)
+
+# Muted semantic colours. Saturated colour is deliberately avoided.
+HEALTHY = (132, 166, 126)
+CAUTION = (82, 166, 210)
+WARNING = (82, 132, 218)
+CRITICAL = (92, 92, 216)
+
+# Neutral selected control, Tesla-like rather than bright-blue.
+SELECTED = (218, 218, 222)
+SELECTED_TEXT = (24, 24, 26)
+
+
 def draw_text(
     canvas: np.ndarray,
     text: str,
