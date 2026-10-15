@@ -1464,7 +1464,7 @@ def main():
                     braking_state=braking_state,
                     control_hazard=control_pedestrian_hazard,
                     metrics_summary=metrics_collector.summary(),
-                    metrics_events=metrics_collector.events(),
+                    metrics_events=metrics_collector.events,
                     live_latencies={
                         "onboard_inference_ms":
                             onboard_packet["inference_ms"],
