@@ -591,12 +591,14 @@ class DriverModeRenderer:
                        scale=0.36, color=MUTED, thickness=1)
         self._put_text(canvas, "SYSTEM", (1062, 616),
                        scale=0.36, color=MUTED, thickness=1)
+        preview = bool(snapshot.get("_preview_recorded"))
         self._fit_text(canvas, str(presentation["data_status"]),
                        (875, 647), 159, 0.51,
-                       CAUTION if stale else GREEN, 2)
+                       CAUTION if stale or preview else GREEN, 2)
         health = str(presentation["display_health"])
         self._fit_text(canvas, health, (1062, 647), 166, 0.51,
-                       CAUTION if stale else GREEN if health == "HEALTHY" else MUTED, 2)
+                       CAUTION if stale else MUTED if preview
+                       else GREEN if health == "HEALTHY" else MUTED, 2)
         sources = presentation["sources"] or []
         text_sources = " + ".join(str(s).upper() for s in sources)
         if not text_sources:
@@ -608,6 +610,14 @@ class DriverModeRenderer:
                *, stale: bool = False) -> np.ndarray:
         """Render four connected cards from the unchanged snapshot schema."""
         presentation = derive_presentation_state(snapshot, stale=stale)
+        if snapshot.get("_preview_recorded") and not stale:
+            # Normal-color layout check of historical data, not a live feed.
+            presentation = {
+                **presentation,
+                "data_status": "PREVIEW",
+                "display_health": "RECORDED",
+                "perception_text": "RECORDED SOURCES",
+            }
         canvas = self._base_canvas.copy()
         self._draw_road(canvas, snapshot, stale)
         self._draw_hazard(canvas, snapshot, stale)
