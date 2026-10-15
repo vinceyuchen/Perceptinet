@@ -1,0 +1,66 @@
+"""Regression tests for SVG-derived Driver Mode icon assets (no CARLA)."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from dashboard.object_icon_assets import (
+    _alpha_mask, draw_icon, resolve_icon,
+)
+
+
+def render(label: str, *, primary: bool = False,
+           stale: bool = False) -> np.ndarray:
+    canvas = np.full((96, 96, 3), 25, np.uint8)
+    assert draw_icon(canvas, (48, 48), label,
+                     size=17, primary=primary, stale=stale)
+    assert np.array_equal(canvas[:, :, 0], canvas[:, :, 1])
+    assert np.array_equal(canvas[:, :, 1], canvas[:, :, 2])
+    return canvas
+
+
+def main() -> None:
+    for kind in (
+        "EGO", "CAR", "TRUCK", "BUS", "MOTORCYCLE", "BICYCLE",
+        "PEDESTRIAN", "PERSON", "MOTORBIKE",
+    ):
+        normal, stale = render(kind), render(kind, stale=True)
+        assert np.count_nonzero(normal[:, :, 0] > 25) > 60, kind
+        assert float(stale.mean()) < float(normal.mean()), kind
+
+    assert resolve_icon("BUS") == "TRUCK"
+    assert resolve_icon("BICYCLE") == "MOTORCYCLE"
+    assert resolve_icon("PERSON") == "PEDESTRIAN"
+    assert resolve_icon("MOTORBIKE") == "MOTORCYCLE"
+    assert np.array_equal(render("BUS"), render("TRUCK"))
+    assert np.array_equal(render("BICYCLE"), render("MOTORCYCLE"))
+    assert np.array_equal(render("PERSON"), render("PEDESTRIAN"))
+    assert np.array_equal(render("MOTORBIKE"), render("MOTORCYCLE"))
+    assert not np.array_equal(render("CAR"), render("TRUCK"))
+    assert not np.array_equal(render("PEDESTRIAN"), render("CAR"))
+
+    # Primary ring is a visual-only state indicator.
+    assert not np.array_equal(render("CAR", primary=True), render("CAR"))
+    assert not np.array_equal(render("PEDESTRIAN", primary=True),
+                              render("PEDESTRIAN"))
+    assert _alpha_mask("CAR", 30).shape == (30, 30)
+
+    unknown = np.full((96, 96, 3), 25, np.uint8)
+    assert not draw_icon(unknown, (48, 48), "UNKNOWN")
+    assert np.all(unknown == 25)
+
+    # Clip safely when a tracked target is at the map boundary.
+    edge = np.full((60, 60, 3), 25, np.uint8)
+    assert draw_icon(edge, (0, 0), "TRUCK", primary=True)
+    print("SVG-DERIVED DRIVER ICON ASSET TEST PASSED")
+
+
+if __name__ == "__main__":
+    main()
