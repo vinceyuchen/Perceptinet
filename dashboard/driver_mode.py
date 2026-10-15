@@ -206,20 +206,11 @@ class DriverModeRenderer:
 
         self._put_text(
             canvas,
-            "DRIVER ASSIST",
-            (30, 38),
+            "DRIVER MODE",
+            (30, 55),
             scale=0.78,
             color=WHITE,
             thickness=2,
-        )
-
-        self._put_text(
-            canvas,
-            "ROAD-USER AWARENESS",
-            (30, 66),
-            scale=0.48,
-            color=MUTED,
-            thickness=1,
         )
 
         presentation = derive_presentation_state(
@@ -236,7 +227,7 @@ class DriverModeRenderer:
         status_pill(
             canvas,
             status_text,
-            (785, 37),
+            (785, 56),
             foreground=status_color,
             fill=SURFACE_2,
             border=BORDER_SOFT,
@@ -310,7 +301,7 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             speed_text,
-            (speed_x, 235),
+            (speed_x, 242),
             scale=speed_scale,
             color=MUTED if stale else WHITE,
             thickness=4,
@@ -319,17 +310,8 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             "km/h",
-            (219, 235),
+            (219, 242),
             scale=0.58,
-            color=MUTED,
-            thickness=1,
-        )
-
-        self._put_text(
-            canvas,
-            f"{speed_mps:.2f} m/s",
-            (57, 275),
-            scale=0.5,
             color=MUTED,
             thickness=1,
         )
@@ -470,224 +452,191 @@ class DriverModeRenderer:
         *,
         stale: bool = False,
     ) -> None:
-        x1, y1 = 340, 115
-        x2, y2 = 930, 625
-
-        self._panel(
-            canvas,
-            (x1, y1),
-            (x2, y2),
-        )
+        x1, y1, x2, y2 = 340, 115, 930, 625
+        self._panel(canvas, (x1, y1), (x2, y2))
 
         self._put_text(
             canvas,
-            "LAST KNOWN SPATIAL VIEW" if stale else "COOPERATIVE SPATIAL VIEW",
+            "LAST KNOWN ROAD VIEW" if stale else "ROAD AHEAD",
             (365, 150),
-            scale=0.55,
-            color=MUTED,
-            thickness=1,
+            scale=0.59,
+            color=MUTED if stale else WHITE,
+            thickness=2,
         )
-
-        # Driver-facing schematic, not a metric-accurate road rendering.
-        road_top_y = 190
-        road_bottom_y = 600
-        center_x = (x1 + x2) // 2
-
         self._put_text(
             canvas,
-            "EGO-RELATIVE  /  SCHEMATIC",
-            (365, 174),
-            scale=0.35,
+            "TOP-DOWN  /  EGO-RELATIVE SCHEMATIC",
+            (365, 177),
+            scale=0.34,
             color=MUTED,
             thickness=1,
         )
 
-        # A subtle corridor fill improves depth without implying a mapped lane.
-        road_polygon = np.array(
-            [
-                [center_x - 55, road_top_y],
-                [center_x + 55, road_top_y],
-                [center_x + 145, road_bottom_y],
-                [center_x - 145, road_bottom_y],
-            ],
-            dtype=np.int32,
+        # This is an ego-relative schematic, not a geocoded map or
+        # a claim of calibrated lane geometry. Distance bands and
+        # detected positions share the same 0-30 m plotting scale.
+        center_x = (x1 + x2) // 2
+        road_left, road_right = center_x - 125, center_x + 125
+        road_top, road_bottom = 204, 604
+        ego_y, forward_span = 568, 340
+
+        rounded_rect(
+            canvas,
+            (road_left - 18, road_top),
+            (road_right + 18, road_bottom),
+            fill=(21, 21, 24),
+            radius=15,
         )
-        cv2.fillConvexPoly(
-            canvas, road_polygon, (27, 27, 30)
+        rounded_rect(
+            canvas,
+            (road_left, road_top),
+            (road_right, road_bottom),
+            fill=(34, 34, 38),
+            border=(53, 53, 60),
+            radius=12,
         )
 
-        # Labels share the same illustrative 0-30 m vertical scale as
-        # the primary hazard marker, so they remain visually consistent.
+        # Boundaries are illustrative. The center dashes indicate
+        # the ego path, not a divider between separate lanes.
+        for edge_x in (road_left + 12, road_right - 12):
+            cv2.line(
+                canvas,
+                (edge_x, road_top + 18),
+                (edge_x, road_bottom - 18),
+                (90, 90, 98),
+                2,
+                cv2.LINE_AA,
+            )
+
         for distance_m in (10, 20, 30):
-            tick_y = int(
-                road_bottom_y - 70
-                - (distance_m / 30.0) * 330
+            tick_y = int(ego_y - distance_m / 30.0 * forward_span)
+            cv2.line(
+                canvas,
+                (road_left + 18, tick_y),
+                (road_right - 18, tick_y),
+                (48, 48, 53),
+                1,
+                cv2.LINE_AA,
             )
             self._put_text(
                 canvas,
                 f"{distance_m} m",
-                (370, tick_y + 5),
+                (374, tick_y + 5),
                 scale=0.36,
                 color=MUTED,
                 thickness=1,
             )
+
+        for dash_y in range(road_top + 31, ego_y - 25, 48):
             cv2.line(
                 canvas,
-                (419, tick_y),
-                (441, tick_y),
-                BORDER_SOFT,
-                1,
+                (center_x, dash_y),
+                (center_x, dash_y + 23),
+                BLUE if not stale else (73, 73, 78),
+                2,
                 cv2.LINE_AA,
             )
 
-        cv2.line(
-            canvas,
-            (center_x - 145, road_bottom_y),
-            (center_x - 55, road_top_y),
-            (80, 80, 80),
-            3,
-        )
-        cv2.line(
-            canvas,
-            (center_x + 145, road_bottom_y),
-            (center_x + 55, road_top_y),
-            (80, 80, 80),
-            3,
-        )
-        cv2.line(
-            canvas,
-            (center_x, road_bottom_y),
-            (center_x, road_top_y),
-            (55, 55, 55),
-            2,
-        )
-
-        for i in range(5):
-            y = road_bottom_y - 65 - i * 72
-            width = 26 - i * 3
-            cv2.line(
-                canvas,
-                (center_x - width, y),
-                (center_x + width, y),
-                (85, 85, 85),
-                2,
-            )
-
-        # Ego vehicle. Use a navigation cursor rather than a debug box.
-        ego_y = road_bottom_y - 42
         draw_navigation_marker(
             canvas,
             (center_x, ego_y),
-            size=18,
-            color=WHITE,
+            size=19,
+            color=MUTED if stale else WHITE,
             heading_deg=0.0,
             halo=True,
         )
         self._put_text(
             canvas,
             "EGO",
-            (center_x - 17, ego_y + 40),
+            (center_x - 18, ego_y + 38),
             scale=0.34,
             color=MUTED,
             thickness=1,
         )
 
-        hazard = snapshot.get("hazard") or {}
-        primary = hazard.get("primary")
-
+        primary = (snapshot.get("hazard") or {}).get("primary")
         if not primary:
             self._put_text(
                 canvas,
-                "No recent position data" if stale else "No immediate hazard",
-                (center_x - 105, 220),
-                scale=0.58,
+                "NO RECENT TARGET DATA" if stale else "NO IMMEDIATE HAZARD",
+                (center_x - 105, 279),
+                scale=0.43,
                 color=MUTED if stale else GREEN,
-                thickness=2,
+                thickness=1,
             )
             return
 
-        level = str(
-            hazard.get("control_level", "NORMAL")
+        forward = self._number(primary.get("longitudinal_m"))
+        lateral = self._number(primary.get("lateral_m"))
+        if forward is None or lateral is None or not all(
+            math.isfinite(value) for value in (forward, lateral)
+        ):
+            self._put_text(
+                canvas,
+                "TARGET POSITION UNAVAILABLE",
+                (center_x - 132, 279),
+                scale=0.43,
+                color=MUTED,
+                thickness=1,
+            )
+            return
+
+        # Do not place off-scale objects at misleading map-edge coordinates.
+        if forward < 0.0 or forward > 30.0 or abs(lateral) > 4.0:
+            self._put_text(
+                canvas,
+                "TARGET OUTSIDE CURRENT VIEW",
+                (center_x - 140, 279),
+                scale=0.43,
+                color=MUTED,
+                thickness=1,
+            )
+            return
+
+        hazard_y = int(ego_y - forward / 30.0 * forward_span)
+        hazard_x = int(center_x + lateral / 4.0 * 110)
+        hazard_level = str(
+            (snapshot.get("hazard") or {}).get("control_level", "NORMAL")
         ).upper()
-        color = self._hazard_color(level)
-
-        longitudinal_m = self._number(
-            primary.get("longitudinal_m")
-        )
-        lateral_m = self._number(
-            primary.get("lateral_m")
-        )
-
-        if longitudinal_m is None:
-            longitudinal_m = self._number(
-                primary.get("distance_m"),
-                0.0,
-            ) or 0.0
-
-        if lateral_m is None:
-            lateral_m = 0.0
-
-        long_clamped = max(
-            0.0,
-            min(30.0, longitudinal_m),
-        )
-        lat_clamped = max(
-            -4.0,
-            min(4.0, lateral_m),
-        )
-
-        hazard_y = int(
-            road_bottom_y
-            - 70
-            - (long_clamped / 30.0) * 330
-        )
-        hazard_x = int(
-            center_x
-            + (lat_clamped / 4.0) * 120
-        )
-
-        class_name = str(
-            primary.get("class_name")
-            or "object"
-        )
-
-        marker_size = 20 if level != "CRITICAL" else 24
+        color = MUTED if stale else self._hazard_color(hazard_level)
+        class_name = str(primary.get("class_name") or "object").upper()
 
         draw_object_marker(
             canvas,
             (hazard_x, hazard_y),
             class_name,
-            color=MUTED if stale else color,
-            size=marker_size,
+            color=color,
+            size=22 if hazard_level == "CRITICAL" else 19,
             primary=True,
         )
-
-        # Avoid spilling long labels past the world-view boundary.
-        label = class_name.upper()
-        (label_width, _), _ = cv2.getTextSize(
-            label, cv2.FONT_HERSHEY_DUPLEX, 0.5, 2
+        (text_width, _), _ = cv2.getTextSize(
+            class_name, cv2.FONT_HERSHEY_DUPLEX, 0.49, 2
         )
-        label_x = hazard_x + 34
-        if label_x + label_width > x2 - 16:
-            label_x = hazard_x - label_width - 34
+        label_x = hazard_x + 30
+        if label_x + text_width > x2 - 18:
+            label_x = hazard_x - text_width - 30
         label_x = max(x1 + 16, label_x)
+        label_y = max(road_top + 36, min(road_bottom - 40, hazard_y - 4))
         self._put_text(
             canvas,
-            label,
-            (label_x, hazard_y + 6),
-            scale=0.5,
-            color=MUTED if stale else color,
+            class_name,
+            (label_x, label_y),
+            scale=0.49,
+            color=color,
             thickness=2,
         )
 
-        cv2.line(
-            canvas,
-            (center_x, ego_y - 22),
-            (hazard_x, hazard_y + marker_size),
-            MUTED if stale else color,
-            1,
-            cv2.LINE_AA,
-        )
+        sources = primary.get("sources") or []
+        source_name = str(sources[0]).upper() if sources else ""
+        if source_name:
+            self._put_text(
+                canvas,
+                source_name[:18],
+                (label_x, label_y + 20),
+                scale=0.35,
+                color=MUTED if stale else BLUE,
+                thickness=1,
+            )
 
     def _draw_action_panel(
         self,
@@ -766,18 +715,10 @@ class DriverModeRenderer:
             self._put_text(
                 canvas,
                 f"{target_speed * 3.6:.1f} km/h",
-                (985, 290),
-                scale=0.72,
+                (985, 302),
+                scale=0.76,
                 color=MUTED if stale else WHITE,
                 thickness=2,
-            )
-            self._put_text(
-                canvas,
-                f"{target_speed:.2f} m/s",
-                (985, 315),
-                scale=0.42,
-                color=MUTED,
-                thickness=1,
             )
 
         cv2.line(
