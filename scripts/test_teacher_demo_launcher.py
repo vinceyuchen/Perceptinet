@@ -44,12 +44,17 @@ def main() -> None:
         scenario_count = [0]
 
         def spawn(command, **kwargs):
-            del kwargs
             script = str(command[1]).replace("\\", "/")
             if script.endswith("scripts/run_dashboard.py"):
                 return dashboard
             assert script.endswith("scripts/run_occluded_pedestrian_braking_v1.py")
             scenario_count[0] += 1
+            env = kwargs["env"]
+            assert env["PERCEPTINET_TEACHER_DEMO"] == "1"
+            assert env["PERCEPTINET_DEMO_CYCLE_INDEX"] == str(
+                scenario_count[0]
+            )
+            assert "PERCEPTINET_VALIDATION" not in env
             info = {
                 "completed": True,
                 "reason": "controller_confirmed_stop",
