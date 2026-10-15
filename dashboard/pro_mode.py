@@ -9,25 +9,40 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from .ui_theme import badge, draw_text, rounded_rect
+from .ui_theme import (
+    BACKGROUND,
+    BORDER_SOFT,
+    CAUTION,
+    COOPERATIVE,
+    CRITICAL,
+    GRID,
+    HEALTHY,
+    SURFACE_1,
+    SURFACE_2,
+    SURFACE_3,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    WARNING,
+    badge,
+    draw_text,
+    rounded_rect,
+)
 
 
-WHITE = (240, 240, 240)
-MUTED = (155, 155, 155)
-GRID = (65, 65, 65)
-PANEL = (24, 24, 24)
-PANEL_LIGHT = (34, 34, 34)
-BACKGROUND = (10, 10, 10)
-GREEN = (90, 210, 120)
-BLUE = (235, 170, 60)
-AMBER = (0, 170, 255)
-RED = (50, 50, 235)
+WHITE = TEXT_PRIMARY
+MUTED = TEXT_SECONDARY
+PANEL = SURFACE_1
+PANEL_LIGHT = SURFACE_2
+GREEN = HEALTHY
+BLUE = COOPERATIVE
+AMBER = CAUTION
+RED = CRITICAL
 
 HAZARD_COLORS = {
     "NORMAL": WHITE,
-    "CAUTION": AMBER,
-    "WARNING": (0, 140, 255),
-    "CRITICAL": RED,
+    "CAUTION": CAUTION,
+    "WARNING": WARNING,
+    "CRITICAL": CRITICAL,
 }
 
 
@@ -90,7 +105,7 @@ class ProModeRenderer:
             p1,
             p2,
             fill=PANEL,
-            border=(52, 52, 52),
+            border=BORDER_SOFT,
             border_thickness=1,
             radius=10,
         )
@@ -215,7 +230,7 @@ class ProModeRenderer:
             "ENGINEERING VIEW",
             (24, 36),
             scale=0.70,
-            color=BLUE,
+            color=WHITE,
             thickness=2,
         )
         self._put_text(
@@ -275,10 +290,19 @@ class ProModeRenderer:
             thickness=2,
         )
 
-        cv2.rectangle(
+        rounded_rect(
             canvas,
             (1325, 14),
             (1574, 64),
+            fill=SURFACE_3,
+            border=color,
+            border_thickness=1,
+            radius=9,
+        )
+        cv2.rectangle(
+            canvas,
+            (1325, 24),
+            (1331, 54),
             color,
             -1,
         )
@@ -286,8 +310,8 @@ class ProModeRenderer:
             canvas,
             level,
             (1350, 48),
-            scale=0.72,
-            color=(10, 10, 10),
+            scale=0.70,
+            color=color,
             thickness=2,
         )
 
@@ -855,7 +879,7 @@ class ProModeRenderer:
                     canvas,
                     (1070, y - 20),
                     (1560, y + 8),
-                    fill=(31, 38, 42),
+                    fill=SURFACE_3,
                     radius=7,
                 )
 
@@ -879,7 +903,7 @@ class ProModeRenderer:
                     "FIRST DETECTION",
                     (badge_x, y),
                     fill=AMBER,
-                    foreground=(10, 10, 10),
+                    foreground=(24, 24, 26),
                     scale=0.29,
                 )
                 badge_x = rect[2] + 7
@@ -890,7 +914,7 @@ class ProModeRenderer:
                     "CONTRIBUTOR",
                     (badge_x, y),
                     fill=BLUE,
-                    foreground=(10, 10, 10),
+                    foreground=(24, 24, 26),
                     scale=0.29,
                 )
 
