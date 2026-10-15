@@ -24,6 +24,8 @@ from .ui_theme import (
     TEXT_SECONDARY,
     WARNING,
     badge,
+    draw_navigation_marker,
+    draw_object_marker,
     draw_text,
     rounded_rect,
 )
@@ -271,13 +273,21 @@ class ProModeRenderer:
             )
         )
 
+        cv2.circle(
+            canvas,
+            (610, 28),
+            5,
+            GREEN if health == "HEALTHY" else AMBER,
+            -1,
+            cv2.LINE_AA,
+        )
         self._put_text(
             canvas,
             f"SYSTEM {health}",
-            (610, 34),
-            scale=0.52,
-            color=GREEN if health == "HEALTHY" else AMBER,
-            thickness=2,
+            (625, 34),
+            scale=0.48,
+            color=MUTED if health == "HEALTHY" else AMBER,
+            thickness=1 if health == "HEALTHY" else 2,
         )
 
         live_text = "LIVE" if not stale else "DATA STALE"
@@ -652,20 +662,24 @@ class ProModeRenderer:
                 color=MUTED,
             )
 
-        # Ego.
-        cv2.rectangle(
+        # Ego. Navigation-style marker keeps the engineering view directional
+        # while removing the placeholder/debug-box appearance.
+        ego_marker_y = plot_bottom - 9
+        draw_navigation_marker(
             canvas,
-            (center_x - 24, plot_bottom - 22),
-            (center_x + 24, plot_bottom + 3),
-            WHITE,
-            2,
+            (center_x, ego_marker_y),
+            size=13,
+            color=WHITE,
+            heading_deg=0.0,
+            halo=True,
         )
         self._put_text(
             canvas,
             "EGO",
-            (center_x - 17, plot_bottom - 6),
-            scale=0.38,
-            color=WHITE,
+            (center_x + 22, ego_marker_y + 5),
+            scale=0.32,
+            color=MUTED,
+            thickness=1,
         )
 
         primary = hazard.get("primary")
@@ -748,25 +762,17 @@ class ProModeRenderer:
                 is_primary=is_primary,
                 hazard_level=hazard_level,
             )
-            radius = 13 if is_primary else 9
-
-            cv2.circle(
-                canvas,
-                (px, py),
-                radius,
-                color,
-                2,
-            )
-            cv2.circle(
-                canvas,
-                (px, py),
-                3,
-                color,
-                -1,
-            )
-
             class_name = str(
                 obj.get("class_name") or "object"
+            )
+
+            draw_object_marker(
+                canvas,
+                (px, py),
+                class_name,
+                color=color,
+                size=12 if is_primary else 10,
+                primary=is_primary,
             )
             confidence = self._number(obj.get("confidence"))
 
@@ -1243,16 +1249,23 @@ class ProModeRenderer:
 
         if latest is not None:
             event_type = str(latest.get("event_type", "event"))
+            event_label = {
+                "stable_detection": "RSU DETECTION",
+                "hazard_transition": "HAZARD UPDATE",
+                "brake_trigger": "BRAKE TRIGGER",
+                "vehicle_stopped": "SAFE STOP",
+            }.get(event_type, event_type.replace("_", " ").upper())
+
             detail = self._timeline_detail(latest)
             sim_time = self._number(latest.get("sim_time_s"))
 
-            latest_text = f"Latest: {event_type}"
+            latest_text = f"Latest event  {event_label}"
 
             if detail:
-                latest_text += f" | {detail}"
+                latest_text += f"   ·   {detail.replace('=', ' ')}"
 
             if sim_time is not None:
-                latest_text += f" | {sim_time:.2f}s"
+                latest_text += f"   ·   sim {sim_time:.2f} s"
 
             self._put_text(
                 canvas,
