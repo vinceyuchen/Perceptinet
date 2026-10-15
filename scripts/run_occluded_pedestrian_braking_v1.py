@@ -29,6 +29,7 @@ from control.braking_controller import BrakingController, BrakingConfig
 from metrics.collector import MetricsCollector
 from dashboard.data_layer import DashboardDataLayer
 from simulation.road_context import RoadContextSampler
+from simulation.demo_output_paths import create_teacher_demo_paths
 from validation.runtime import ValidationConfig, ValidationRunTracker
 
 
@@ -695,21 +696,31 @@ def main():
         validation_config
     )
 
-    if validation_config.enabled:
-        results_dir = validation_config.run_dir
-    else:
-        results_dir = REPO_ROOT / "results"
-
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    # Optional teacher-demo lifecycle. The same CARLA / YOLO / V2I / Fusion /
-    # Risk / Braking pipeline runs without modification. Only after the
-    # existing controller has reported a genuine stop will the run finish.
-    # A separate launcher then starts the next clean CARLA scene.
+    # Teacher Demo keeps the live Dashboard snapshot at its original
+    # location, but must never overwrite an old CSV/metrics artifact.
+    # Excel and other viewers can hold Windows write locks on those files.
     teacher_demo = (
         os.environ.get("PERCEPTINET_TEACHER_DEMO") == "1"
         and not validation_config.enabled
     )
+    if validation_config.enabled:
+        results_dir = validation_config.run_dir
+        dashboard_snapshot_path = results_dir / "dashboard_snapshot.json"
+    elif teacher_demo:
+        results_dir, dashboard_snapshot_path = create_teacher_demo_paths(
+            REPO_ROOT,
+            os.environ.get("PERCEPTINET_DEMO_CYCLE_INDEX", "1"),
+        )
+        print("TEACHER DEMO | Isolated cycle metrics:", results_dir)
+        print("TEACHER DEMO | Live dashboard:", dashboard_snapshot_path)
+    else:
+        results_dir = REPO_ROOT / "results"
+        dashboard_snapshot_path = results_dir / "dashboard_snapshot.json"
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Optional teacher-demo lifecycle. Real CARLA / YOLO / V2I / Fusion /
+    # Risk / Braking pipeline remains unchanged.
     demo_stop_file = Path(os.environ.get(
         "PERCEPTINET_DEMO_STOP_FILE",
         str(results_dir / "teacher_demo_stop.signal"),
@@ -729,9 +740,6 @@ def main():
     csv_path = results_dir / "occluded_pedestrian_world_v1.csv"
     metrics_summary_path = results_dir / "metrics_summary.json"
     metrics_events_path = results_dir / "metrics_events.csv"
-    dashboard_snapshot_path = (
-        results_dir / "dashboard_snapshot.json"
-    )
 
     metrics_collector = MetricsCollector(
         stable_detection_frames=3
