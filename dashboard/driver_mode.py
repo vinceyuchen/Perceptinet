@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from .road_corridors import draw_road_corridors
+from .object_icon_assets import draw_icon
 from .presentation_state import derive_presentation_state
 from .ui_theme import (
     BACKGROUND,
@@ -308,49 +309,19 @@ class DriverModeRenderer:
     @staticmethod
     def _ego_marker(canvas: np.ndarray, center: Tuple[int, int],
                     *, stale: bool) -> None:
-        """Light-map navigation chevron, independent of Pro Mode styling."""
-        cx, cy = center
-        cv2.circle(canvas, center, 31, (43, 43, 43), -1, cv2.LINE_AA)
-        cv2.circle(canvas, center, 31, (119, 119, 119), 1, cv2.LINE_AA)
-        ink = (167, 167, 167) if stale else (246, 246, 246)
-        chevron = np.asarray([
-            (cx, cy - 22), (cx + 17, cy + 18),
-            (cx, cy + 8), (cx - 17, cy + 18),
-        ], dtype=np.int32)
-        cv2.fillConvexPoly(canvas, chevron, ink, cv2.LINE_AA)
-        notch = np.asarray([
-            (cx, cy - 9), (cx + 7, cy + 10),
-            (cx, cy + 4), (cx - 7, cy + 10),
-        ], dtype=np.int32)
-        cv2.fillConvexPoly(canvas, notch, (43, 43, 43), cv2.LINE_AA)
+        """Draw the uploaded EGO SVG emblem at the established map anchor."""
+        draw_icon(canvas, center, "EGO", stale=stale)
 
     @staticmethod
     def _road_object(canvas: np.ndarray, center: Tuple[int, int],
                      klass: str, color: Tuple[int, int, int],
-                     *, primary: bool, size: int) -> None:
-        """Grey-only pedestrian ring or top-down vehicle silhouette."""
-        cx, cy = center
-        if klass == "PEDESTRIAN":
-            radius = size + (3 if primary else 0)
-            cv2.circle(canvas, center, radius, color,
-                       3 if primary else 2, cv2.LINE_AA)
-            cv2.circle(canvas, center, max(3, size // 4), color,
-                       -1, cv2.LINE_AA)
-        elif klass in {"CAR", "BUS", "TRUCK", "MOTORCYCLE", "BICYCLE"}:
-            half_w = int(size * (1.10 if klass in {"TRUCK", "BUS"} else 0.90))
-            half_h = int(size * (1.55 if klass in {"TRUCK", "BUS"} else 1.30))
-            rounded_rect(
-                canvas, (cx - half_w, cy - half_h),
-                (cx + half_w, cy + half_h),
-                fill=(42, 42, 42), border=color,
-                border_thickness=2 if primary else 1,
-                radius=max(4, half_w // 2),
-            )
-            cv2.line(canvas, (cx - half_w // 2, cy - half_h + 4),
-                     (cx + half_w // 2, cy - half_h + 4), color,
-                     2, cv2.LINE_AA)
-        else:
-            cv2.circle(canvas, center, size, color, 2, cv2.LINE_AA)
+                     *, primary: bool, size: int,
+                     stale: bool = False) -> None:
+        """Render SVG-derived object artwork; preserve unknown fallback."""
+        if not draw_icon(canvas, center, klass, size=size,
+                         primary=primary, stale=stale):
+            cv2.circle(canvas, center, size, color,
+                       2 if primary else 1, cv2.LINE_AA)
 
     def _draw_detected_objects(
         self, canvas: np.ndarray, snapshot: Dict[str, Any],
@@ -408,7 +379,7 @@ class DriverModeRenderer:
                      else BLUE if klass == "PEDESTRIAN" else (187, 187, 187))
             self._road_object(canvas, (px, py), klass, color,
                               size=18 if is_primary else 13,
-                              primary=is_primary)
+                              primary=is_primary, stale=stale)
             (tw, _), _ = cv2.getTextSize(
                 klass, cv2.FONT_HERSHEY_DUPLEX, 0.43, 1)
             tx = px+23 if px+23+tw < 778 else px-tw-25
@@ -491,7 +462,7 @@ class DriverModeRenderer:
                 color = MUTED if stale else self._hazard_color(level)
                 klass = str(active_primary.get("class_name") or "OBJECT").upper()
                 self._road_object(canvas, (px, py), klass, color,
-                                  size=19, primary=True)
+                                  size=19, primary=True, stale=stale)
                 self._fit_text(canvas, klass, (px+28, py-7), 155,
                                0.45, color, 1)
                 return
