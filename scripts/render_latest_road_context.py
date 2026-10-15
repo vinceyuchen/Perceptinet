@@ -62,9 +62,14 @@ def main() -> None:
     if not cv2.imwrite(str(stale_path), app.render(snapshot, stale=True)):
         raise RuntimeError(f"Failed to write {stale_path}")
 
-    # The second image is an explicit layout illustration, not live telemetry.
+    # This is an old snapshot. Render non-stale colors only to inspect
+    # layout, with an unmistakable PREVIEW pill instead of LIVE.
+    layout_snapshot = dict(snapshot)
+    layout_snapshot["_preview_recorded"] = True
     layout_path = output / "driver_mode_v62_layout_preview.png"
-    if not cv2.imwrite(str(layout_path), app.render(snapshot, stale=False)):
+    if not cv2.imwrite(
+        str(layout_path), app.render(layout_snapshot, stale=False)
+    ):
         raise RuntimeError(f"Failed to write {layout_path}")
 
     segments = road.get("segments") or []
@@ -75,7 +80,7 @@ def main() -> None:
     print(f"Road segments: {len(segments)}")
     print(f"Junction-labelled segments: {junctions}")
     print(f"Recorded-data image: {stale_path}")
-    print(f"Layout-only LIVE illustration: {layout_path}")
+    print(f"Recorded layout illustration (PREVIEW): {layout_path}")
     print("ROAD VIEW RENDERED. Inspect both files; do not treat the")
     print("layout-only preview as live validation evidence.")
 
