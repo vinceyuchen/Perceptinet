@@ -2,6 +2,8 @@
 
 import math
 import sys
+
+import cv2
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +65,15 @@ def main():
     assert np.any(frame[240:570, 54:75])    # Cross street at left
     assert np.any(frame[240:570, 778:800])  # Cross street at right
 
+    # Each corner joins the longitudinal and transverse street edge.
+    # Four joined corner branches, not eight disconnected line stubs.
+    bw = (frame[:, :, 0] > 35).astype(np.uint8)
+    _, _, stats, _ = cv2.connectedComponentsWithStats(bw, connectivity=8)
+    long_lines = sum(
+        int(area) >= 35 for area in stats[1:, cv2.CC_STAT_AREA]
+    )
+    assert 1 <= long_lines <= 5, f"Disconnected junction edges: {long_lines}"
+
     # The main road uses fixed +/-4.5m edges, independent of the number
     # and actual widths of sampled CARLA driving lanes.
     # The v6.6 tube is visually wider, while remaining independent
@@ -113,7 +124,7 @@ def main():
     assert not draw_road_corridors(
         empty, [{"points": [[float("nan"), 0], [0, 1]]}], project
     )
-    print("V6.7 EXTENDED LINE-ONLY ROAD CORRIDOR TEST PASSED")
+    print("V6.8 SMOOTH JUNCTION CORRIDOR TEST PASSED")
 
 
 if __name__ == "__main__":
