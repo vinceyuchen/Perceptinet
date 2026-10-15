@@ -52,6 +52,11 @@ def main() -> None:
                               render("PEDESTRIAN"))
     assert _alpha_mask("CAR", 30).shape == (30, 30)
 
+    # Compact Ego should not draw its old 31 px-radius halo.
+    ego = render("EGO")
+    assert np.all(ego[48, 48 + 29] == 25)
+    assert np.any(ego[48, 48 + 23] != 25)
+
     unknown = np.full((96, 96, 3), 25, np.uint8)
     assert not draw_icon(unknown, (48, 48), "UNKNOWN")
     assert np.all(unknown == 25)
