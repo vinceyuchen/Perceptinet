@@ -294,6 +294,80 @@ def badge(
     return rect
 
 
+def status_pill(
+    canvas: np.ndarray,
+    text: str,
+    xy: Tuple[int, int],
+    *,
+    foreground: Color = TEXT_PRIMARY,
+    fill: Color = SURFACE_3,
+    border: Color = BORDER_SOFT,
+    scale: float = 0.36,
+    height: int = 24,
+    dot: bool = True,
+) -> Tuple[int, int, int, int]:
+    """
+    Compact automotive status chip used by both Driver and Pro modes.
+
+    Colour stays restrained: the surface remains graphite and semantic colour
+    is carried by the small indicator dot and text rather than a large bright
+    block.
+    """
+    label = str(text)
+
+    (text_w, _), _ = cv2.getTextSize(
+        label,
+        cv2.FONT_HERSHEY_DUPLEX,
+        scale,
+        1,
+    )
+
+    x, y = int(xy[0]), int(xy[1])
+    dot_space = 18 if dot else 0
+    width = text_w + dot_space + 22
+
+    rect = (
+        x,
+        y - height + 5,
+        x + width,
+        y + 5,
+    )
+
+    rounded_rect(
+        canvas,
+        (rect[0], rect[1]),
+        (rect[2], rect[3]),
+        fill=fill,
+        border=border,
+        border_thickness=1,
+        radius=height // 2,
+    )
+
+    text_x = x + 11
+
+    if dot:
+        cv2.circle(
+            canvas,
+            (x + 12, y - height // 2 + 5),
+            4,
+            foreground,
+            -1,
+            cv2.LINE_AA,
+        )
+        text_x = x + 26
+
+    draw_text(
+        canvas,
+        label,
+        (text_x, y - 2),
+        scale=scale,
+        color=foreground,
+        thickness=1,
+    )
+
+    return rect
+
+
 def _rotated_points(
     center: Tuple[int, int],
     points: np.ndarray,
