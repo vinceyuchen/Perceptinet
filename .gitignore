@@ -57,3 +57,4 @@ credentials.json
 # Generated experiment results
 results/*.csv
 results/*.png
+results/*.json
