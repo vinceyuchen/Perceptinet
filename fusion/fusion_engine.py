@@ -28,6 +28,8 @@ class FusionEngine:
         fusion_distance_m: float = 2.0,
         temporal_max_missed_frames: int = 2,
         confidence_ema_alpha: float = 0.65,
+        display_position_ema_alpha: float = 0.45,
+        display_source_hold_frames: int = 2,
     ):
         self.fusion_distance_m = float(
             fusion_distance_m
@@ -42,6 +44,17 @@ class FusionEngine:
                 0.0,
                 float(confidence_ema_alpha),
             ),
+        )
+        self.display_position_ema_alpha = min(
+            1.0,
+            max(
+                0.0,
+                float(display_position_ema_alpha),
+            ),
+        )
+        self.display_source_hold_frames = max(
+            0,
+            int(display_source_hold_frames),
         )
 
         self._tracks: Dict[str, Dict[str, Any]] = {}
@@ -324,6 +337,19 @@ class FusionEngine:
                 "source_history": list(
                     obj.get("sources", [])
                 ),
+                "display_world_position": deepcopy(
+                    obj.get("world_position")
+                ),
+                "display_sources": list(
+                    obj.get("sources", [])
+                ),
+                "display_source_count": len(
+                    obj.get("sources", [])
+                ),
+                "source_miss_frames": {
+                    str(source): 0
+                    for source in obj.get("sources", [])
+                },
             }
         )
 
@@ -360,9 +386,36 @@ class FusionEngine:
         )
 
         track["actor_id"] = obj.get("actor_id")
-        track["world_position"] = deepcopy(
+
+        current_world_position = deepcopy(
             obj["world_position"]
         )
+
+        previous_display_position = (
+            track.get("display_world_position")
+            or track.get("world_position")
+            or current_world_position
+        )
+
+        position_alpha = (
+            self.display_position_ema_alpha
+        )
+
+        track["display_world_position"] = {
+            axis: (
+                position_alpha
+                * float(current_world_position[axis])
+                + (1.0 - position_alpha)
+                * float(
+                    previous_display_position[axis]
+                )
+            )
+            for axis in ("x", "y", "z")
+        }
+
+        # Preserve the raw fused position for RiskEngine and metrics.
+        track["world_position"] = current_world_position
+
         track["sources"] = list(
             obj.get("sources", [])
         )
@@ -379,6 +432,33 @@ class FusionEngine:
                 history.append(source)
 
         track["source_history"] = history
+
+        source_misses = dict(
+            track.get("source_miss_frames", {})
+        )
+
+        for source in history:
+            source_misses[source] = (
+                int(source_misses.get(source, 0))
+                + 1
+            )
+
+        for source in track["sources"]:
+            source_misses[source] = 0
+
+        track["source_miss_frames"] = source_misses
+        track["display_sources"] = [
+            source
+            for source in history
+            if source_misses.get(
+                source,
+                self.display_source_hold_frames + 1,
+            )
+            <= self.display_source_hold_frames
+        ]
+        track["display_source_count"] = len(
+            track["display_sources"]
+        )
         track["track_age_frames"] = int(
             track.get("track_age_frames", 0)
         ) + 1
@@ -402,6 +482,32 @@ class FusionEngine:
         ) + 1
         track["coasted"] = True
         track["temporal_status"] = "COASTED"
+
+        source_misses = dict(
+            track.get("source_miss_frames", {})
+        )
+
+        for source in list(source_misses):
+            source_misses[source] = (
+                int(source_misses[source]) + 1
+            )
+
+        track["source_miss_frames"] = source_misses
+        history = list(
+            track.get("source_history", [])
+        )
+        track["display_sources"] = [
+            source
+            for source in history
+            if source_misses.get(
+                source,
+                self.display_source_hold_frames + 1,
+            )
+            <= self.display_source_hold_frames
+        ]
+        track["display_source_count"] = len(
+            track["display_sources"]
+        )
 
     def _apply_temporal_tracking(
         self,
@@ -486,4 +592,8 @@ class FusionEngine:
             "objects": stable_objects,
             "temporal_max_missed_frames":
                 self.temporal_max_missed_frames,
+            "display_position_ema_alpha":
+                self.display_position_ema_alpha,
+            "display_source_hold_frames":
+                self.display_source_hold_frames,
         }
