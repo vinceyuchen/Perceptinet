@@ -63,19 +63,19 @@ CLASS_NAME_OVERRIDES = {
     "person": "pedestrian",
 }
 
-OCCLUDER_FORWARD_DISTANCES = [12.0, 15.0, 18.0, 21.0]
+OCCLUDER_FORWARD_DISTANCES = [17.0, 18.0, 16.0, 19.0]
 
 # Keep the occluding truck beside the Ego centre path rather
 # than directly inside it. The pedestrian remains behind the
 # inner edge of the truck from the Onboard Camera viewpoint.
-OCCLUDER_LATERAL_OFFSET_M = 2.4
+OCCLUDER_LATERAL_OFFSET_M = 2.7
 
-PEDESTRIAN_FORWARD_FROM_OCCLUDER = 8.0
+PEDESTRIAN_FORWARD_FROM_OCCLUDER = 3.0
 
 # Relative to the truck. With a +2.4 m truck offset these
 # produce pedestrian lateral positions around +1.7 to +2.3 m
 # from the Ego path, still inside RiskEngine's 2.5 m corridor.
-PEDESTRIAN_LATERAL_OFFSETS = [-0.3, -0.5, -0.1, -0.7]
+PEDESTRIAN_LATERAL_OFFSETS = [-0.6, -0.8, -0.4, -1.0]
 
 TRUCK_PATH_CLEARANCE_MIN_M = 0.10
 
@@ -589,6 +589,67 @@ def main():
             f"risk_corridor="
             f"+/-{RiskConfig().lane_half_width_m:.2f}m"
         )
+
+        # ----------------------------------------------------
+        # Horizontal occlusion check
+        #
+        # Project the Ego->pedestrian line of sight onto the
+        # longitudinal plane occupied by the truck.
+        #
+        # If that LOS passes through the truck's lateral bbox,
+        # the truck can still occlude the pedestrian while
+        # remaining physically clear of the Ego path.
+        # ----------------------------------------------------
+
+        ego_forward_geometry = (
+            ego_transform.get_forward_vector()
+        )
+
+        truck_forward_m = (
+            truck_dx * ego_forward_geometry.x
+            + truck_dy * ego_forward_geometry.y
+        )
+
+        pedestrian_forward_m = (
+            pedestrian_dx * ego_forward_geometry.x
+            + pedestrian_dy * ego_forward_geometry.y
+        )
+
+        if pedestrian_forward_m <= 0.0:
+            raise RuntimeError(
+                "Pedestrian is not ahead of Ego"
+            )
+
+        los_lateral_at_truck_m = (
+            pedestrian_lateral_m
+            * truck_forward_m
+            / pedestrian_forward_m
+        )
+
+        los_offset_from_truck_center_m = abs(
+            los_lateral_at_truck_m
+            - truck_lateral_m
+        )
+
+        horizontal_occlusion_margin_m = (
+            truck_half_width_m
+            - los_offset_from_truck_center_m
+        )
+
+        print(
+            "Occlusion geometry | "
+            f"truck_forward={truck_forward_m:.2f}m | "
+            f"ped_forward={pedestrian_forward_m:.2f}m | "
+            f"LOS_at_truck={los_lateral_at_truck_m:.2f}m | "
+            f"truck_center={truck_lateral_m:.2f}m | "
+            f"margin={horizontal_occlusion_margin_m:.2f}m"
+        )
+
+        if horizontal_occlusion_margin_m <= 0.0:
+            raise RuntimeError(
+                "Truck no longer horizontally occludes "
+                "the pedestrian"
+            )
 
         if (
             abs(pedestrian_lateral_m)
