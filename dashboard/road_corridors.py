@@ -216,6 +216,9 @@ def draw_road_corridors(
         return float(np.interp(along, profile[:, 0], profile[:, 1]))
 
     count = 0
+    # Keep only the ends beside the *junction gap*, not screen-border ends.
+    # Each end stores its adjacent sample for a reliable local tangent.
+    junction_ends: List[Tuple[str, Tuple[float, float], Tuple[float, float]]] = []
 
     def stroke(points: List[Tuple[float, float]]) -> None:
         nonlocal count
@@ -225,13 +228,15 @@ def draw_road_corridors(
             [(project(lat, fwd)[0] - x0, project(lat, fwd)[1] - y0)
              for lat, fwd in points], dtype=np.int32
         )
-        cv2.polylines(layer, [coords], False, (75, 91, 107), 4, cv2.LINE_AA)
-        cv2.polylines(layer, [coords], False, (171, 181, 192), 1, cv2.LINE_AA)
+        cv2.polylines(layer, [coords], False, (138, 138, 138), 4, cv2.LINE_AA)
+        cv2.polylines(layer, [coords], False, (70, 70, 70), 1, cv2.LINE_AA)
         count += len(points) - 1
 
     for direction, profile in profiles.items():
         for side in (-1.0, 1.0):
             path: List[Tuple[float, float]] = []
+            after_gap = False
+            pending_start = False
             for i, (along, center) in enumerate(profile):
                 prev = profile[max(0, i - 1)]
                 nxt = profile[min(len(profile) - 1, i + 1)]
@@ -260,9 +265,65 @@ def draw_road_corridors(
                         and abs(lateral - main) < HALF_STREET_WIDTH_M + 0.4
                     )
                 if within_junction:
+                    if len(path) >= 2:
+                        junction_ends.append((direction, path[-1], path[-2]))
                     stroke(path)
                     path = []
+                    after_gap = True
+                    pending_start = False
                 else:
+                    if not path and after_gap:
+                        pending_start = True
+                        after_gap = False
                     path.append((lateral, forward))
+                    if pending_start and len(path) >= 2:
+                        junction_ends.append((direction, path[0], path[1]))
+                        pending_start = False
             stroke(path)
+
+    # Smoothly connect the four street *outer corners* rather than leaving
+    # disconnected perpendicular line ends. Matching is done by proximity
+    # and road orientation so single-road and T-junction cases are safe.
+    candidates = []
+    for i, (di, pi, ai) in enumerate(junction_ends):
+        for j in range(i + 1, len(junction_ends)):
+            dj, pj, aj = junction_ends[j]
+            if di == dj:
+                continue
+            distance = math.hypot(pi[0] - pj[0], pi[1] - pj[1])
+            if distance <= 6.5:
+                candidates.append((distance, i, j))
+    used = set()
+    for _, i, j in sorted(candidates):
+        if i in used or j in used:
+            continue
+        _, start, adjacent_start = junction_ends[i]
+        _, end, adjacent_end = junction_ends[j]
+
+        def projected(p: Tuple[float, float]) -> np.ndarray:
+            px, py = project(*p)
+            return np.asarray((float(px - x0), float(py - y0)))
+
+        p0, p2 = projected(start), projected(end)
+        t0 = p0 - projected(adjacent_start)
+        t2 = p2 - projected(adjacent_end)
+        determinant = float(np.linalg.det(np.column_stack((t0, -t2))))
+        control = (p0 + p2) / 2.0
+        if abs(determinant) > 1e-4:
+            coeff = np.linalg.solve(
+                np.column_stack((t0, -t2)), p2 - p0
+            )
+            candidate = p0 + coeff[0] * t0
+            if (np.isfinite(candidate).all()
+                    and np.linalg.norm(candidate - p0) < 95
+                    and np.linalg.norm(candidate - p2) < 95):
+                control = candidate
+        # Quadratic Bézier matches both approaching road tangents.
+        arc = np.asarray([
+            (1 - t) ** 2 * p0 + 2 * (1 - t) * t * control + t ** 2 * p2
+            for t in np.linspace(0.0, 1.0, 17)
+        ], dtype=np.int32)
+        cv2.polylines(layer, [arc], False, (138, 138, 138), 4, cv2.LINE_AA)
+        cv2.polylines(layer, [arc], False, (70, 70, 70), 1, cv2.LINE_AA)
+        used.update((i, j))
     return count > 0
