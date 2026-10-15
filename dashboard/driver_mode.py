@@ -34,8 +34,8 @@ from .ui_theme import (
 )
 
 
-# Driver-only grayscale palette (OpenCV BGR). Pro Mode is unchanged.
-# Safety states retain explicit text and typographic hierarchy.
+# Driver-only dark glass, with semantic color reserved for critical status.
+# OpenCV color tuples are BGR. Pro Mode palette and controls are unchanged.
 WHITE = (246, 246, 246)
 MUTED = (178, 178, 178)
 BLUE = (209, 209, 209)
@@ -45,11 +45,17 @@ WARNING = (242, 242, 242)
 CRITICAL = (255, 255, 255)
 PANEL = (34, 34, 34)
 PANEL_LIGHT = (43, 43, 43)
+
+# Calm -> caution -> danger. Stale/recorded readings stay neutral grey.
+SAFE_GREEN = (135, 204, 121)
+ALERT_YELLOW = (58, 203, 248)
+DANGER_RED = (84, 83, 244)
+SEVERE_RED = (64, 60, 255)
 HAZARD_COLORS = {
-    "NORMAL": GREEN,
-    "CAUTION": CAUTION,
-    "WARNING": WARNING,
-    "CRITICAL": CRITICAL,
+    "NORMAL": SAFE_GREEN,
+    "CAUTION": ALERT_YELLOW,
+    "WARNING": DANGER_RED,
+    "CRITICAL": SEVERE_RED,
 }
 
 
@@ -258,6 +264,38 @@ class DriverModeRenderer:
         self._put_text(canvas, text, xy, scale=scale,
                        color=color, thickness=thickness)
 
+    @staticmethod
+    def _vehicle_state_color(action: str, *, stale: bool) -> Tuple[int, int, int]:
+        """Use urgency, not class, to color the dominant vehicle state."""
+        if stale:
+            return MUTED
+        action = str(action).upper()
+        if action == "EMERGENCY BRAKING":
+            return SEVERE_RED
+        if action == "SLOWING":
+            return ALERT_YELLOW
+        return SAFE_GREEN  # DRIVING / STOPPED are non-escalating states.
+
+    def _centered_text(self, canvas: np.ndarray, text: str,
+                       center_x: int, baseline_y: int,
+                       *, max_width: int, scale: float,
+                       color: Tuple[int, int, int],
+                       thickness: int = 2) -> None:
+        """Center a bold state label, scaling only if text is unusually long."""
+        text = str(text)
+        width, _ = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_DUPLEX, scale, thickness
+        )
+        if width[0] > max_width:
+            scale = max(0.47, scale * max_width / width[0])
+            width, _ = cv2.getTextSize(
+                text, cv2.FONT_HERSHEY_DUPLEX, scale, thickness
+            )
+        self._put_text(
+            canvas, text, (int(center_x - width[0] / 2), baseline_y),
+            scale=scale, color=color, thickness=thickness,
+        )
+
     def _road_projection(self, lateral: float, forward: float) -> Tuple[int, int]:
         """Fixed v6.6 schematic projection. No dynamic or risk-based zoom.
 
@@ -387,18 +425,6 @@ class DriverModeRenderer:
             self._road_object(canvas, (px, py), klass, color,
                               size=18 if is_primary else 13,
                               primary=is_primary, stale=stale)
-            (tw, _), _ = cv2.getTextSize(
-                klass, cv2.FONT_HERSHEY_DUPLEX, 0.43, 1)
-            tx = px+23 if px+23+tw < 778 else px-tw-25
-            ty = min(635, max(192, py-7))
-            self._fit_text(canvas, klass, (tx, ty), 145,
-                           0.43, color, 1)
-            if is_primary:
-                sources = obj.get("display_sources") or obj.get("sources") or []
-                if sources:
-                    self._fit_text(canvas, str(sources[0]).upper(),
-                                   (tx, ty+18), 145, 0.34,
-                                   MUTED if stale else BLUE, 1)
             count += 1
         return count
 
@@ -446,8 +472,6 @@ class DriverModeRenderer:
                     scale=0.40, height=29)
         cx, ego_y = self._road_projection(0.0, 0.0)
         self._ego_marker(canvas, (cx, ego_y), stale=stale)
-        self._put_text(canvas, "EGO", (413, ego_y+38),
-                       scale=0.39, color=MUTED, thickness=1)
 
         hazard = snapshot.get("hazard") or {}
         level = str(hazard.get("control_level", "NORMAL")).upper()
@@ -470,56 +494,103 @@ class DriverModeRenderer:
                 klass = str(active_primary.get("class_name") or "OBJECT").upper()
                 self._road_object(canvas, (px, py), klass, color,
                                   size=19, primary=True, stale=stale)
-                self._fit_text(canvas, klass, (px+28, py-7), 155,
-                               0.45, color, 1)
                 return
-        self._put_text(canvas, "NO RECENT TRACKS" if stale else "NO TRACKED OBJECTS",
-                       (583, 651), scale=0.36, color=MUTED, thickness=1)
 
     def _draw_hazard(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                      stale: bool) -> None:
+        """One dominant target + matching SVG icon, then distance and TTC."""
         hazard = snapshot.get("hazard") or {}
         level = str(hazard.get("control_level", "NORMAL")).upper()
-        # Avoid showing the first NORMAL risk as an active danger:
-        # the data layer may pick an ego-overlap car in a NORMAL-only run.
         primary = self._active_primary(snapshot)
         color = MUTED if stale else self._hazard_color(level)
-        self._put_text(canvas, "HAZARD", (875, 58),
-                       scale=0.52, color=MUTED, thickness=1)
-        self._fit_text(canvas, "LAST KNOWN" if stale else level,
-                       (1098, 58), 134, 0.43, color, 2)
-        klass = (str(primary.get("class_name") or "OBJECT").upper()
-                 if primary else ("TARGET UNCONFIRMED" if level != "NORMAL"
-                                  else "NO ACTIVE ALERT"))
-        self._fit_text(canvas, klass, (875, 114), 347, 0.91,
-                       color if primary or level != "NORMAL"
-                       else (MUTED if stale else GREEN), 2)
-        self._put_text(canvas, "DISTANCE", (875, 157),
-                       scale=0.42, color=MUTED, thickness=1)
-        self._put_text(canvas, "TIME TO COLLISION", (1054, 157),
+        center_x = 1052
+
+        if primary is not None:
+            klass = str(primary.get("class_name") or "OBJECT").upper()
+            klass = {"PERSON": "PEDESTRIAN",
+                     "MOTORBIKE": "MOTORCYCLE"}.get(klass, klass)
+            # Keep the entire icon + label pair geometrically centered.
+            font_scale, thickness = 1.04, 2
+            (tw, _), _ = cv2.getTextSize(
+                klass, cv2.FONT_HERSHEY_DUPLEX, font_scale, thickness
+            )
+            available_text_width = 318
+            if tw > available_text_width:
+                font_scale *= available_text_width / tw
+                (tw, _), _ = cv2.getTextSize(
+                    klass, cv2.FONT_HERSHEY_DUPLEX, font_scale, thickness
+                )
+            icon_side, gap = 43, 14
+            left = int(center_x - (icon_side + gap + tw) / 2)
+            icon_position = (left + icon_side // 2, 96)
+            if not draw_icon(
+                canvas, icon_position, klass, size=22,
+                primary=False, stale=stale
+            ):
+                # No category-specific artwork means no misleading
+                # substitution with a different road-user class.
+                cv2.circle(canvas, icon_position, 16, color, 2, cv2.LINE_AA)
+                self._put_text(canvas, "?", (icon_position[0] - 8, 103),
+                               scale=0.6, color=color, thickness=2)
+            self._put_text(
+                canvas, klass, (left + icon_side + gap, 109),
+                scale=font_scale, color=color, thickness=thickness
+            )
+        elif level == "NORMAL":
+            self._centered_text(
+                canvas, "ROAD CLEAR", center_x, 108,
+                max_width=362, scale=1.16, color=color
+            )
+        else:
+            # A warning without a validated primary is not a confirmed
+            # pedestrian/car; display uncertainty rather than invent one.
+            self._centered_text(
+                canvas, "TARGET", center_x, 89,
+                max_width=350, scale=1.23, color=color
+            )
+            self._centered_text(
+                canvas, "UNCONFIRMED", center_x, 121,
+                max_width=350, scale=0.83, color=color
+            )
+
+        status = "DATA STALE" if stale else level
+        self._centered_text(
+            canvas, status, center_x, 147, max_width=315,
+            scale=0.46, color=MUTED if stale else color, thickness=1
+        )
+
+        self._put_text(canvas, "DISTANCE", (875, 177),
+                       scale=0.38, color=MUTED, thickness=1)
+        self._put_text(canvas, "TTC", (1070, 177),
                        scale=0.38, color=MUTED, thickness=1)
         distance = self._finite(primary.get("distance_m")) if primary else None
         ttc = self._finite(primary.get("ttc_s")) if primary else None
-        self._put_text(canvas, "--" if distance is None else f"{distance:.1f} m",
-                       (875, 209), scale=0.83,
-                       color=MUTED if stale else WHITE, thickness=2)
-        self._put_text(canvas, "--" if ttc is None else f"{ttc:.1f} s",
-                       (1054, 209), scale=0.83, color=color, thickness=2)
+        self._fit_text(
+            canvas, "--" if distance is None else f"{distance:.1f} m",
+            (875, 215), 164, 0.83,
+            MUTED if stale else WHITE, 2
+        )
+        self._fit_text(
+            canvas, "--" if ttc is None else f"{ttc:.1f} s",
+            (1070, 215), 164, 0.83,
+            MUTED if stale else color, 2
+        )
 
     def _draw_vehicle(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                       stale: bool, presentation: Dict[str, Any]) -> None:
-        self._put_text(canvas, "VEHICLE RESPONSE", (875, 290),
-                       scale=0.52, color=MUTED, thickness=1)
-        action = str(presentation["vehicle_action"])
-        color = (MUTED if stale else GREEN
-                 if action in ("DRIVING", "STOPPED")
-                 else self._hazard_color(str(presentation["hazard_level"])))
-        self._fit_text(canvas, action, (875, 351), 350, 0.87, color, 2)
-        cv2.line(canvas, (875, 373), (1224, 373),
+        """Large, centered action first. Speeds remain secondary evidence."""
+        action = str(presentation["vehicle_action"]).upper()
+        color = self._vehicle_state_color(action, stale=stale)
+        self._centered_text(
+            canvas, action, 1052, 352, max_width=363,
+            scale=1.22 if action != "EMERGENCY BRAKING" else 0.95,
+            color=color, thickness=3
+        )
+        cv2.line(canvas, (875, 377), (1224, 377),
                  (84, 84, 84), 1, cv2.LINE_AA)
-        self._put_text(canvas, "CURRENT SPEED", (875, 403),
+        self._put_text(canvas, "CURRENT SPEED", (875, 406),
                        scale=0.40, color=MUTED, thickness=1)
-        self._put_text(canvas, "TARGET SPEED", (1063, 403),
+        self._put_text(canvas, "TARGET SPEED", (1063, 406),
                        scale=0.40, color=MUTED, thickness=1)
         current = self._finite((snapshot.get("ego") or {}).get("speed_mps"))
         target = self._finite((snapshot.get("braking") or {}).get("target_speed_mps"))
@@ -527,7 +598,7 @@ class DriverModeRenderer:
         target_txt = "--" if target is None else f"{target*3.6:.1f}"
         for x, value, maxw in ((875, current_txt, 167),
                                (1063, target_txt, 165)):
-            self._fit_text(canvas, f"{value} km/h", (x, 446), maxw,
+            self._fit_text(canvas, f"{value} km/h", (x, 449), maxw,
                            0.72, MUTED if stale else WHITE, 2)
 
     def _draw_system(self, canvas: np.ndarray, snapshot: Dict[str, Any],
