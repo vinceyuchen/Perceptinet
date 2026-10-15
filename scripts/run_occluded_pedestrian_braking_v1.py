@@ -1,5 +1,7 @@
 import sys
 import csv
+import json
+import os
 import math
 import threading
 import time
@@ -699,6 +701,30 @@ def main():
         results_dir = REPO_ROOT / "results"
 
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Optional teacher-demo lifecycle. The same CARLA / YOLO / V2I / Fusion /
+    # Risk / Braking pipeline runs without modification. Only after the
+    # existing controller has reported a genuine stop will the run finish.
+    # A separate launcher then starts the next clean CARLA scene.
+    teacher_demo = (
+        os.environ.get("PERCEPTINET_TEACHER_DEMO") == "1"
+        and not validation_config.enabled
+    )
+    demo_stop_file = Path(os.environ.get(
+        "PERCEPTINET_DEMO_STOP_FILE",
+        str(results_dir / "teacher_demo_stop.signal"),
+    ))
+    demo_cycle_file = Path(os.environ.get(
+        "PERCEPTINET_DEMO_CYCLE_FILE",
+        str(results_dir / "teacher_demo_cycle.json"),
+    ))
+    try:
+        demo_hold_s = max(1.0, min(15.0, float(
+            os.environ.get("PERCEPTINET_DEMO_STOP_HOLD_SECONDS", "3.0")
+        )))
+    except ValueError:
+        demo_hold_s = 3.0
+    demo_stop_since = None
 
     csv_path = results_dir / "occluded_pedestrian_world_v1.csv"
     metrics_summary_path = results_dir / "metrics_summary.json"
@@ -2285,6 +2311,35 @@ def main():
 
             if key in (ord("q"), 27):
                 break
+
+            if teacher_demo:
+                if demo_stop_file.is_file():
+                    print("TEACHER DEMO | Operator requested clean shutdown")
+                    break
+                if stop_reported:
+                    # Publish multiple STOPPED frames before the next cycle.
+                    # The marker is a success signal, never a fake telemetry
+                    # or an instruction to the braking controller.
+                    if demo_stop_since is None:
+                        demo_stop_since = time.monotonic()
+                    if time.monotonic() - demo_stop_since >= demo_hold_s:
+                        demo_cycle_file.parent.mkdir(
+                            parents=True, exist_ok=True
+                        )
+                        temporary = demo_cycle_file.with_suffix(".tmp")
+                        temporary.write_text(
+                            json.dumps({
+                                "completed": True,
+                                "reason": "controller_confirmed_stop",
+                                "frame_id": onboard_frame_id,
+                                "sim_time_s": onboard_timestamp,
+                            }),
+                            encoding="utf-8",
+                        )
+                        temporary.replace(demo_cycle_file)
+                        print("TEACHER DEMO | STOP HOLD COMPLETE | "
+                              "restarting next scenario via launcher")
+                        break
 
             if validation_config.enabled:
                 if validation_tracker.reached_time_limit(
