@@ -253,15 +253,30 @@ class DriverModeRenderer:
                        color=color, thickness=thickness)
 
     def _road_projection(self, lateral: float, forward: float) -> Tuple[int, int]:
-        """Ego-relative [lateral, forward] metres -> Road View pixel."""
-        return (int(round(430 + lateral * 10.0)),
-                int(round(590 - forward * 10.2)))
+        """Fixed v6.6 schematic projection. No dynamic or risk-based zoom.
+
+        Show a wider side/forward context while giving nearby road users
+        more screen space. The longitudinal compression is illustrative,
+        not a metric-accurate distance ruler.
+        """
+        screen_x = 430.0 + lateral * 10.5
+        if forward < 0.0:
+            screen_y = 616.0 - forward * 9.0
+        elif forward <= 50.0:
+            screen_y = 616.0 - 16.0 * forward + 0.13 * forward * forward
+        else:
+            # Continue monotonically beyond the top of the visible window.
+            screen_y = 141.0 - 3.0 * (forward - 50.0)
+        return int(round(screen_x)), int(round(screen_y))
 
     def _draw_fallback_road(self, canvas: np.ndarray) -> None:
         """Minimal parallel street boundaries when no CARLA map is available."""
-        for x in (385, 475):
+        # Align the no-map fallback with the same v6.6 road projection.
+        for lateral in (-5.4, 5.4):
+            start = self._road_projection(lateral, -6.0)
+            end = self._road_projection(lateral, 46.0)
             cv2.line(
-                canvas, (x, 180), (x, 644),
+                canvas, start, end,
                 (149, 156, 164), 2, cv2.LINE_AA,
             )
 
@@ -315,7 +330,7 @@ class DriverModeRenderer:
                 # Exclude it from the *map drawing only*, not from raw data.
                 continue
             forward, lateral = dx*co + dy*si, -dx*si + dy*co
-            if not (-6 <= forward <= 40 and abs(lateral) <= 18):
+            if not (-8 <= forward <= 52 and abs(lateral) <= 24):
                 continue
             class_name = str(obj.get("class_name") or "OBJECT").upper()
             if class_name not in {"PEDESTRIAN", "CAR", "TRUCK", "BUS",
@@ -403,7 +418,7 @@ class DriverModeRenderer:
         draw_navigation_marker(canvas, (cx, ego_y), size=24,
                                color=MUTED if stale else WHITE,
                                heading_deg=0.0, halo=True)
-        self._put_text(canvas, "EGO", (413, ego_y+45),
+        self._put_text(canvas, "EGO", (413, ego_y+38),
                        scale=0.39, color=MUTED, thickness=1)
 
         hazard = snapshot.get("hazard") or {}
