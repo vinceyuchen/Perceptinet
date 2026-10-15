@@ -63,3 +63,5 @@ results/*.json
 # Keep them on the VM across git stash -u / git pulls.
 results/validation/
 results/dashboard_polish_preview/
+# Looping teacher-demo artifacts (may include many cycles).
+results/teacher_demo/
