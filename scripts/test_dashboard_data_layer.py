@@ -179,6 +179,7 @@ def main():
     )
 
     assert snapshot["schema_version"] == "dashboard-v1"
+    assert "road_context" not in snapshot  # Older snapshots stay unchanged
     assert snapshot["system_health"]["status"] == "HEALTHY"
     assert snapshot["ego"]["speed_mps"] == 3.5
     assert snapshot["hazard"]["control_level"] == "WARNING"
@@ -229,8 +230,15 @@ def main():
             risk_result=risk_result,
             braking_command=braking_command,
             braking_state="DRIVING",
+            road_context={
+                "version": 1,
+                "source": "carla_waypoints",
+                "coordinate_frame": "ego_relative_lateral_forward_m",
+                "segments": [],
+            },
         )
 
+        assert file_snapshot["road_context"]["source"] == "carla_waypoints"
         assert len(file_snapshot["timeline"]) == 2
         assert (
             file_snapshot["latency_ms"]["v2i_latency_ms"]
