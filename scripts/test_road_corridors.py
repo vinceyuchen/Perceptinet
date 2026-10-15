@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.road_corridors import draw_road_corridors
+from dashboard.road_corridors import _extend_profile, draw_road_corridors
 
 
 def project(lat, fwd):
@@ -56,6 +56,13 @@ def main():
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     assert draw_road_corridors(frame, segments, project)
 
+    # Fitted street endpoints must continue to all four view boundaries,
+    # without changing the original samples or filling the street.
+    assert np.any(frame[142:160, 300:560])  # Forward road at top
+    assert np.any(frame[664:682, 300:560])  # Forward road at bottom
+    assert np.any(frame[240:570, 54:75])    # Cross street at left
+    assert np.any(frame[240:570, 778:800])  # Cross street at right
+
     # The main road uses fixed +/-4.5m edges, independent of the number
     # and actual widths of sampled CARLA driving lanes.
     # The v6.6 tube is visually wider, while remaining independent
@@ -70,6 +77,17 @@ def main():
     assert not np.any(frame[488, 475])
     assert not np.any(frame[340, 430])
     assert np.count_nonzero(frame[:, :, 0]) < 20000
+
+    profile = np.asarray([[0.0, 1.0], [1.0, 1.1],
+                          [2.0, 1.2], [3.0, 1.3]])
+    original = profile.copy()
+    extended = _extend_profile(profile, -4.0, 8.0)
+    assert np.array_equal(profile, original)
+    assert extended[0, 0] <= -4.0
+    assert extended[-1, 0] >= 8.0
+    assert np.all(np.diff(extended[:, 0]) > 0)
+    assert np.any(np.all(extended == profile[0], axis=1))
+    assert np.any(np.all(extended == profile[-1], axis=1))
 
     wider = [dict(s, width_m=7.0) for s in segments]
     wider_frame = np.zeros_like(frame)
@@ -95,7 +113,7 @@ def main():
     assert not draw_road_corridors(
         empty, [{"points": [[float("nan"), 0], [0, 1]]}], project
     )
-    print("V6.5 CENTERLINE ROAD CORRIDOR TEST PASSED")
+    print("V6.7 EXTENDED LINE-ONLY ROAD CORRIDOR TEST PASSED")
 
 
 if __name__ == "__main__":
