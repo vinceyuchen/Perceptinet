@@ -26,6 +26,7 @@ from risk.risk_engine import RiskEngine, RiskConfig
 from control.braking_controller import BrakingController, BrakingConfig
 from metrics.collector import MetricsCollector
 from dashboard.data_layer import DashboardDataLayer
+from validation.runtime import ValidationConfig, ValidationRunTracker
 
 
 # Deterministic kinematic Ego motion for Risk Transition v1.
@@ -366,7 +367,18 @@ def main():
     actors = []
     traffic_manager = None
 
-    results_dir = REPO_ROOT / "results"
+    validation_config = ValidationConfig.from_environment(
+        REPO_ROOT
+    )
+    validation_tracker = ValidationRunTracker(
+        validation_config
+    )
+
+    if validation_config.enabled:
+        results_dir = validation_config.run_dir
+    else:
+        results_dir = REPO_ROOT / "results"
+
     results_dir.mkdir(parents=True, exist_ok=True)
 
     csv_path = results_dir / "occluded_pedestrian_world_v1.csv"
@@ -458,6 +470,7 @@ def main():
     brake_start_travelled_m = None
     brake_estimated_stop_distance_m = None
     stop_reported = False
+    motion_guard_triggered = False
 
     print(
         f"Automatic braking Ego cruise speed: "
@@ -467,7 +480,21 @@ def main():
         "Braking controller: "
         "CAUTION=0.0, WARNING=0.5, CRITICAL=6.0 m/s^2"
     )
-    print("World-coordinate association enabled\nV2I channel enabled")
+    print("World-coordinate association enabled")
+
+    if validation_config.cooperative_enabled:
+        print("V2I channel enabled")
+    else:
+        print("V2I channel disabled for BASELINE control run")
+
+    if validation_config.enabled:
+        print(
+            "Final validation | "
+            f"mode={validation_config.mode.upper()} | "
+            f"run_id={validation_config.run_id} | "
+            f"headless={validation_config.headless} | "
+            f"auto_exit={validation_config.auto_exit}"
+        )
 
     csv_file = open(csv_path, "w", newline="", encoding="utf-8")
     csv_writer = csv.writer(csv_file)
@@ -1032,6 +1059,12 @@ def main():
                 ):
                     ego_command_speed_mps = 0.0
                     ego_speed_this_tick_mps = 0.0
+                    motion_guard_triggered = True
+
+                    if validation_config.enabled:
+                        validation_tracker.mark_motion_guard(
+                            distance_m=ego_to_pedestrian_m,
+                        )
 
                     print(
                         "MOTION GUARD STOP | "
@@ -1151,49 +1184,42 @@ def main():
             )
 
             # ------------------------------------------------
-            # V2I v1
-            # RSU packet must cross the simulated V2I channel
-            # before the Ego/Fusion side can consume it.
+            # V2I / Baseline control selection
+            #
+            # COOPERATIVE:
+            #   onboard + post-V2I RSU packets feed FusionEngine.
+            #
+            # BASELINE:
+            #   RSU transmission is OFF and only the onboard
+            #   packet is available to the Ego-side fusion/risk
+            #   pipeline. The RSU detector may still run as a
+            #   shadow evaluator, but its data never influences
+            #   control decisions.
             # ------------------------------------------------
 
-            received_rsu_packet = v2i_channel.transmit(
-                rsu_packet,
-                source_id="RSU-01",
-            )
+            fusion_packets = [onboard_packet]
 
-            if received_rsu_packet is None:
-                # V1 currently uses 0% packet loss, but keep
-                # this guard for future network experiments.
-                continue
+            if validation_config.cooperative_enabled:
+                received_rsu_packet = v2i_channel.transmit(
+                    rsu_packet,
+                    source_id="RSU-01",
+                )
 
-            # Everything downstream now sees the packet
-            # AFTER V2I transmission.
-            rsu_packet = received_rsu_packet
+                if received_rsu_packet is None:
+                    continue
 
-            metrics_collector.record_perception_packet(
-                rsu_packet
-            )
+                rsu_packet = received_rsu_packet
 
-            # ------------------------------------------------
-            # Fusion v1
-            #
-            # Onboard packet:
-            #   local Ego Vehicle perception
-            #
-            # RSU packet:
-            #   remote perception AFTER V2I transmission
-            #
-            # Output:
-            #   unified world model
-            # ------------------------------------------------
+                metrics_collector.record_perception_packet(
+                    rsu_packet
+                )
+
+                fusion_packets.append(rsu_packet)
 
             fusion_start = time.perf_counter()
 
             fused_world = fusion_engine.fuse(
-                [
-                    onboard_packet,
-                    rsu_packet,
-                ]
+                fusion_packets
             )
 
             fusion_latency_ms = (
@@ -1242,6 +1268,52 @@ def main():
             risk_latency_ms = (
                 time.perf_counter() - risk_start
             ) * 1000.0
+
+            if validation_config.enabled:
+                evaluation_ego = ego_vehicle.get_transform()
+                evaluation_pedestrian = pedestrian.get_transform()
+                evaluation_truck = occluder_vehicle.get_transform()
+
+                evaluation_distance_m = (
+                    evaluation_ego.location.distance(
+                        evaluation_pedestrian.location
+                    )
+                )
+
+                truck_dx_eval = (
+                    evaluation_truck.location.x
+                    - evaluation_ego.location.x
+                )
+                truck_dy_eval = (
+                    evaluation_truck.location.y
+                    - evaluation_ego.location.y
+                )
+
+                truck_ahead_m = (
+                    ego_path_forward.x * truck_dx_eval
+                    + ego_path_forward.y * truck_dy_eval
+                )
+
+                validation_tracker.observe_frame(
+                    frame_id=onboard_frame_id,
+                    sim_time_s=onboard_timestamp,
+                    ego_to_pedestrian_m=evaluation_distance_m,
+                    truck_ahead_m=truck_ahead_m,
+                    onboard_detected=(
+                        get_pedestrian_detection(
+                            onboard_packet
+                        )
+                        is not None
+                    ),
+                    rsu_detected=(
+                        get_pedestrian_detection(
+                            rsu_packet
+                        )
+                        is not None
+                    ),
+                    ego_travelled_m=ego_travelled_m,
+                    ego_speed_mps=ego_speed_this_tick_mps,
+                )
 
             pedestrian_risk = next(
                 (
@@ -1438,6 +1510,14 @@ def main():
                     hazard_level=control_pedestrian_hazard,
                 )
 
+                if validation_config.enabled:
+                    validation_tracker.mark_brake_trigger(
+                        distance_m=brake_start_distance_m,
+                        ttc_s=brake_start_ttc_s,
+                        speed_mps=brake_start_speed_mps,
+                        hazard_level=control_pedestrian_hazard,
+                    )
+
             if (
                 braking_command["braking_active"]
                 and not stop_reported
@@ -1506,6 +1586,14 @@ def main():
                     hazard_level=control_pedestrian_hazard,
                 )
 
+                if validation_config.enabled:
+                    validation_tracker.mark_system_stop(
+                        final_clearance_m=final_clearance_m,
+                        actual_braking_distance_m=(
+                            actual_braking_distance
+                        ),
+                    )
+
                 metrics_collector.export_summary_json(
                     metrics_summary_path
                 )
@@ -1553,7 +1641,10 @@ def main():
                         "rsu_inference_ms":
                             rsu_packet["inference_ms"],
                         "v2i_latency_ms":
-                            rsu_packet["v2i"]["latency_ms"],
+                            (
+                                (rsu_packet.get("v2i") or {})
+                                .get("latency_ms")
+                            ),
                         "fusion_latency_ms":
                             fusion_latency_ms,
                         "risk_latency_ms":
@@ -1608,53 +1699,52 @@ def main():
             onboard_ped = get_pedestrian_detection(onboard_packet)
             rsu_ped = get_pedestrian_detection(rsu_packet)
 
-            onboard_view = draw_detections(
-                onboard_frame,
-                onboard_packet["detections"],
-            )
+            if not validation_config.headless:
+                onboard_view = draw_detections(
+                    onboard_frame,
+                    onboard_packet["detections"],
+                )
 
-            rsu_view = draw_detections(
-                rsu_frame,
-                rsu_packet["detections"],
-            )
+                rsu_view = draw_detections(
+                    rsu_frame,
+                    rsu_packet["detections"],
+                )
 
+                onboard_view = cv2.resize(
+                    onboard_view,
+                    (PREVIEW_WIDTH, PREVIEW_HEIGHT),
+                    interpolation=cv2.INTER_AREA,
+                )
 
+                rsu_view = cv2.resize(
+                    rsu_view,
+                    (PREVIEW_WIDTH, PREVIEW_HEIGHT),
+                    interpolation=cv2.INTER_AREA,
+                )
 
-            onboard_view = cv2.resize(
-                onboard_view,
-                (PREVIEW_WIDTH, PREVIEW_HEIGHT),
-                interpolation=cv2.INTER_AREA,
-            )
+                add_header(onboard_view, "ONBOARD PERCEPTION")
+                add_header(rsu_view, "RSU-01 PERCEPTION")
 
-            rsu_view = cv2.resize(
-                rsu_view,
-                (PREVIEW_WIDTH, PREVIEW_HEIGHT),
-                interpolation=cv2.INTER_AREA,
-            )
+                add_status(
+                    onboard_view,
+                    "Pedestrian: NOT DETECTED"
+                    if onboard_ped is None
+                    else world_position_text(onboard_ped),
+                )
 
-            add_header(onboard_view, "ONBOARD PERCEPTION")
-            add_header(rsu_view, "RSU-01 PERCEPTION")
+                add_status(
+                    rsu_view,
+                    world_position_text(rsu_ped),
+                )
 
-            add_status(
-                onboard_view,
-                "Pedestrian: NOT DETECTED"
-                if onboard_ped is None
-                else world_position_text(onboard_ped),
-            )
+                combined = np.hstack(
+                    (onboard_view, rsu_view)
+                )
 
-            add_status(
-                rsu_view,
-                world_position_text(rsu_ped),
-            )
-
-            combined = np.hstack(
-                (onboard_view, rsu_view)
-            )
-
-            cv2.imshow(
-                "Perceptinet - Automatic Braking Demo v1",
-                combined,
-            )
+                cv2.imshow(
+                    "Perceptinet - Automatic Braking Demo v1",
+                    combined,
+                )
 
             # Save every matched detection to CSV.
             for packet in (onboard_packet, rsu_packet):
@@ -1695,7 +1785,8 @@ def main():
                     f'actor={match["actor_id"]} | '
                     f'world=({pos["x"]:.2f}, {pos["y"]:.2f}, {pos["z"]:.2f}) | '
                     f'depth={match["camera_depth_m"]:.2f}m | '
-                    f'v2i={rsu_packet["v2i"]["latency_ms"]:.2f}ms'
+                    f'v2i='
+                    f'{("OFF" if not (rsu_packet.get("v2i") or {}).get("latency_ms") else format((rsu_packet.get("v2i") or {}).get("latency_ms"), ".2f") + "ms")}'
                 )
 
             elif rsu_ped is not None:
@@ -1705,10 +1796,37 @@ def main():
                     f'WORLD MATCH FAILED'
                 )
 
-            key = cv2.waitKey(1) & 0xFF
+            key = 255
+
+            if not validation_config.headless:
+                key = cv2.waitKey(1) & 0xFF
 
             if key in (ord("q"), 27):
                 break
+
+            if validation_config.enabled:
+                if validation_tracker.reached_time_limit(
+                    onboard_timestamp
+                ):
+                    validation_tracker.mark_timeout()
+                    print(
+                        "VALIDATION TIME LIMIT | "
+                        f"{validation_config.max_sim_seconds:.1f}s"
+                    )
+                    break
+
+                if (
+                    validation_config.auto_exit
+                    and (
+                        stop_reported
+                        or motion_guard_triggered
+                    )
+                ):
+                    print(
+                        "VALIDATION AUTO EXIT | "
+                        f"mode={validation_config.mode.upper()}"
+                    )
+                    break
 
             elapsed = time.perf_counter() - loop_start
             sleep_time = FIXED_DELTA - elapsed
@@ -1727,6 +1845,21 @@ def main():
             metrics_collector.export_events_csv(
                 metrics_events_path
             )
+
+            if validation_config.enabled:
+                validation_summary_path = (
+                    results_dir / "validation_summary.json"
+                )
+
+                validation_tracker.export_summary_json(
+                    validation_summary_path,
+                    pipeline_metrics=metrics_collector.summary(),
+                )
+
+                print(
+                    "VALIDATION SUMMARY SAVED | "
+                    f"{validation_summary_path}"
+                )
         except Exception as exc:
             print(f"Metrics export warning: {exc}")
 
