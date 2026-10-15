@@ -255,14 +255,14 @@ def draw_road_corridors(
                     cross = street_center("cross", lateral)
                     within_junction = (
                         cross is not None
-                        and abs(forward - cross) < HALF_STREET_WIDTH_M + 0.4
+                        and abs(forward - cross) < HALF_STREET_WIDTH_M + 1.4
                     )
                 else:
                     lateral, forward = shifted_along, perpendicular
                     main = street_center("forward", forward)
                     within_junction = (
                         main is not None
-                        and abs(lateral - main) < HALF_STREET_WIDTH_M + 0.4
+                        and abs(lateral - main) < HALF_STREET_WIDTH_M + 1.4
                     )
                 if within_junction:
                     if len(path) >= 2:
