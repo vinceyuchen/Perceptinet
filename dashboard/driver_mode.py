@@ -33,17 +33,17 @@ from .ui_theme import (
 )
 
 
-# Driver-only monochrome palette (BGR): do not alter Pro Mode tokens.
-# Safety distinctions are retained in text labels, weight and outlined chips.
-WHITE = (33, 33, 33)  # dark typography on pale glass
-MUTED = (104, 104, 104)
-BLUE = (77, 77, 77)   # cooperative source, grayscale only
-GREEN = (67, 67, 67)
-CAUTION = (91, 91, 91)
-WARNING = (51, 51, 51)
-CRITICAL = (22, 22, 22)
-PANEL = (245, 245, 245)
-PANEL_LIGHT = (233, 233, 233)
+# Driver-only grayscale palette (OpenCV BGR). Pro Mode is unchanged.
+# Safety states retain explicit text and typographic hierarchy.
+WHITE = (246, 246, 246)
+MUTED = (178, 178, 178)
+BLUE = (209, 209, 209)
+GREEN = (202, 202, 202)
+CAUTION = (211, 211, 211)
+WARNING = (242, 242, 242)
+CRITICAL = (255, 255, 255)
+PANEL = (34, 34, 34)
+PANEL_LIGHT = (43, 43, 43)
 HAZARD_COLORS = {
     "NORMAL": GREEN,
     "CAUTION": CAUTION,
@@ -202,12 +202,12 @@ class DriverModeRenderer:
 
     def _glass_card(self, canvas: np.ndarray, box: Tuple[int, int, int, int],
                     road: bool = False) -> None:
-        """Cached cool-grey translucent card, with neutral glass highlights."""
+        """Dark graphite translucent glass with monochrome highlights."""
         x1, y1, x2, y2 = box
         w, h = x2 - x1, y2 - y1
         roi = canvas[y1:y2, x1:x2]
         blur = cv2.GaussianBlur(roi, (0, 0), sigmaX=11)
-        top_value, bottom_value = ((252, 237) if road else (249, 229))
+        top_value, bottom_value = ((49, 29) if road else (55, 33))
         t = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None, None]
         shade = top_value * (1.0 - t) + bottom_value * t
         tinted = np.broadcast_to(shade, (h, w, 3))
@@ -219,18 +219,18 @@ class DriverModeRenderer:
         roi[mask > 0] = blended[mask > 0]
         inner = cv2.erode(mask, np.ones((3, 3), dtype=np.uint8))
         edge = cv2.subtract(mask, inner)
-        roi[edge > 0] = (193, 193, 193)
+        roi[edge > 0] = (80, 80, 80)
         cv2.line(canvas, (x1 + 30, y1 + 3), (x2 - 30, y1 + 3),
-                 (255, 255, 255), 1, cv2.LINE_AA)
+                 (111, 111, 111), 1, cv2.LINE_AA)
 
     def _make_base(self) -> np.ndarray:
-        """Four light frosted-glass cards on a neutral gradient canvas."""
+        """Four dark frosted-glass cards on a graphite background."""
         yy, xx = np.mgrid[:720, :1280].astype(np.float32)
         upper_glow = np.exp(-((xx - 260) / 710) ** 2
                             - ((yy - 60) / 460) ** 2)
         lower_glow = np.exp(-((xx - 1090) / 680) ** 2
                             - ((yy - 750) / 530) ** 2)
-        tone = np.clip(227.0 + 13.0 * upper_glow + 5.0 * lower_glow,
+        tone = np.clip(13.0 + 13.0 * upper_glow + 7.0 * lower_glow,
                        0, 255).astype(np.uint8)
         frame = np.repeat(tone[:, :, None], 3, axis=2)
         self._glass_card(frame, (20, 20, 824, 700), road=True)
@@ -287,7 +287,7 @@ class DriverModeRenderer:
                 panel,
                 (start[0] - left, start[1] - top),
                 (end[0] - left, end[1] - top),
-                (98, 98, 98), 2, cv2.LINE_AA,
+                (177, 177, 177), 2, cv2.LINE_AA,
             )
 
     def _draw_context_roads(
@@ -310,9 +310,9 @@ class DriverModeRenderer:
                     *, stale: bool) -> None:
         """Light-map navigation chevron, independent of Pro Mode styling."""
         cx, cy = center
-        cv2.circle(canvas, center, 31, (243, 243, 243), -1, cv2.LINE_AA)
-        cv2.circle(canvas, center, 31, (174, 174, 174), 1, cv2.LINE_AA)
-        ink = (108, 108, 108) if stale else (38, 38, 38)
+        cv2.circle(canvas, center, 31, (43, 43, 43), -1, cv2.LINE_AA)
+        cv2.circle(canvas, center, 31, (119, 119, 119), 1, cv2.LINE_AA)
+        ink = (167, 167, 167) if stale else (246, 246, 246)
         chevron = np.asarray([
             (cx, cy - 22), (cx + 17, cy + 18),
             (cx, cy + 8), (cx - 17, cy + 18),
@@ -322,7 +322,7 @@ class DriverModeRenderer:
             (cx, cy - 9), (cx + 7, cy + 10),
             (cx, cy + 4), (cx - 7, cy + 10),
         ], dtype=np.int32)
-        cv2.fillConvexPoly(canvas, notch, (243, 243, 243), cv2.LINE_AA)
+        cv2.fillConvexPoly(canvas, notch, (43, 43, 43), cv2.LINE_AA)
 
     @staticmethod
     def _road_object(canvas: np.ndarray, center: Tuple[int, int],
@@ -342,7 +342,7 @@ class DriverModeRenderer:
             rounded_rect(
                 canvas, (cx - half_w, cy - half_h),
                 (cx + half_w, cy + half_h),
-                fill=(240, 240, 240), border=color,
+                fill=(42, 42, 42), border=color,
                 border_thickness=2 if primary else 1,
                 radius=max(4, half_w // 2),
             )
@@ -405,7 +405,7 @@ class DriverModeRenderer:
                 "control_level", "NORMAL")).upper()
             color = (MUTED if stale else
                      self._hazard_color(level) if is_primary
-                     else BLUE if klass == "PEDESTRIAN" else (98, 98, 98))
+                     else BLUE if klass == "PEDESTRIAN" else (187, 187, 187))
             self._road_object(canvas, (px, py), klass, color,
                               size=18 if is_primary else 13,
                               primary=is_primary)
@@ -464,7 +464,7 @@ class DriverModeRenderer:
         status_pill(canvas, pill_label,
                     (652, 76),
                     foreground=CAUTION if stale or snapshot.get("_preview_recorded") else GREEN,
-                    fill=(238, 238, 238), border=(190, 190, 190),
+                    fill=(48, 48, 48), border=(99, 99, 99),
                     scale=0.40, height=29)
         cx, ego_y = self._road_projection(0.0, 0.0)
         self._ego_marker(canvas, (cx, ego_y), stale=stale)
@@ -538,7 +538,7 @@ class DriverModeRenderer:
                  else self._hazard_color(str(presentation["hazard_level"])))
         self._fit_text(canvas, action, (875, 351), 350, 0.87, color, 2)
         cv2.line(canvas, (875, 373), (1224, 373),
-                 (192, 192, 192), 1, cv2.LINE_AA)
+                 (84, 84, 84), 1, cv2.LINE_AA)
         self._put_text(canvas, "CURRENT SPEED", (875, 403),
                        scale=0.40, color=MUTED, thickness=1)
         self._put_text(canvas, "TARGET SPEED", (1063, 403),
@@ -562,7 +562,7 @@ class DriverModeRenderer:
         self._fit_text(canvas, perception, (875, 574), 345,
                        0.65, status_color, 2)
         cv2.line(canvas, (875, 590), (1224, 590),
-                 (192, 192, 192), 1, cv2.LINE_AA)
+                 (84, 84, 84), 1, cv2.LINE_AA)
         self._put_text(canvas, "DATA", (875, 616),
                        scale=0.36, color=MUTED, thickness=1)
         self._put_text(canvas, "SYSTEM", (1062, 616),
