@@ -58,3 +58,8 @@ credentials.json
 results/*.csv
 results/*.png
 results/*.json
+
+# Local CARLA validation snapshots and dashboard previews.
+# Keep them on the VM across git stash -u / git pulls.
+results/validation/
+results/dashboard_polish_preview/
