@@ -307,15 +307,6 @@ class PerceptinetDashboardApp:
             thickness=2,
         )
 
-        self._put_text(
-            canvas,
-            "ONE LIVE WORLD MODEL / TWO VIEWS",
-            (300, 35),
-            scale=0.43,
-            color=MUTED,
-            thickness=1,
-        )
-
         self._draw_button(
             canvas,
             self.driver_button,
