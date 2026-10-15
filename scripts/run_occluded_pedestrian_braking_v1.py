@@ -24,6 +24,7 @@ from v2i.channel import V2IChannel, V2IConfig
 from fusion.fusion_engine import FusionEngine
 from risk.risk_engine import RiskEngine, RiskConfig
 from control.braking_controller import BrakingController, BrakingConfig
+from metrics.collector import MetricsCollector
 
 
 # Deterministic kinematic Ego motion for Risk Transition v1.
@@ -286,6 +287,12 @@ def main():
     results_dir.mkdir(parents=True, exist_ok=True)
 
     csv_path = results_dir / "occluded_pedestrian_world_v1.csv"
+    metrics_summary_path = results_dir / "metrics_summary.json"
+    metrics_events_path = results_dir / "metrics_events.csv"
+
+    metrics_collector = MetricsCollector(
+        stable_detection_frames=3
+    )
 
     model_path = Path(YOLO_MODEL_PATH)
     model = YOLO(str(model_path) if model_path.exists() else "yolo26n.pt")
@@ -994,6 +1001,8 @@ def main():
 
             last_processed_frame = onboard_frame_id
 
+            pipeline_start = time.perf_counter()
+
             results = model.predict(
                 source=[onboard_frame, rsu_frame],
                 device=YOLO_DEVICE,
@@ -1044,6 +1053,12 @@ def main():
                 CAMERA_FOV,
             )
 
+            # Feed real per-camera detections/inference timing
+            # into Metrics v1 before the remote packet crosses V2I.
+            metrics_collector.record_perception_packet(
+                onboard_packet
+            )
+
             # ------------------------------------------------
             # V2I v1
             # RSU packet must cross the simulated V2I channel
@@ -1064,6 +1079,10 @@ def main():
             # AFTER V2I transmission.
             rsu_packet = received_rsu_packet
 
+            metrics_collector.record_perception_packet(
+                rsu_packet
+            )
+
             # ------------------------------------------------
             # Fusion v1
             #
@@ -1077,12 +1096,18 @@ def main():
             #   unified world model
             # ------------------------------------------------
 
+            fusion_start = time.perf_counter()
+
             fused_world = fusion_engine.fuse(
                 [
                     onboard_packet,
                     rsu_packet,
                 ]
             )
+
+            fusion_latency_ms = (
+                time.perf_counter() - fusion_start
+            ) * 1000.0
 
             fused_pedestrian = next(
                 (
@@ -1116,10 +1141,16 @@ def main():
                 "speed_mps": float(ego_speed_mps),
             }
 
+            risk_start = time.perf_counter()
+
             risk_result = risk_engine.assess_world(
                 ego_state,
                 fused_world,
             )
+
+            risk_latency_ms = (
+                time.perf_counter() - risk_start
+            ) * 1000.0
 
             pedestrian_risk = next(
                 (
@@ -1151,6 +1182,13 @@ def main():
                     "HAZARD OBSERVED | "
                     f"{last_observed_pedestrian_hazard} -> "
                     f"{observed_pedestrian_hazard}"
+                )
+
+                metrics_collector.record_hazard_transition(
+                    old_level=last_observed_pedestrian_hazard,
+                    new_level=observed_pedestrian_hazard,
+                    sim_time_s=onboard_timestamp,
+                    frame_id=onboard_frame_id,
                 )
 
                 last_observed_pedestrian_hazard = (
@@ -1215,10 +1253,27 @@ def main():
                     observed_pedestrian_hazard
                 )
 
+            control_start = time.perf_counter()
+
             braking_command = braking_controller.update(
                 current_speed_mps=ego_speed_this_tick_mps,
                 hazard_level=control_pedestrian_hazard,
                 dt_s=fixed_delta,
+            )
+
+            control_latency_ms = (
+                time.perf_counter() - control_start
+            ) * 1000.0
+
+            end_to_end_latency_ms = (
+                time.perf_counter() - pipeline_start
+            ) * 1000.0
+
+            metrics_collector.record_pipeline_timing(
+                fusion_ms=fusion_latency_ms,
+                risk_ms=risk_latency_ms,
+                control_ms=control_latency_ms,
+                end_to_end_ms=end_to_end_latency_ms,
             )
 
             # This becomes the speed for the NEXT CARLA tick.
@@ -1283,6 +1338,15 @@ def main():
                     "BRAKE TRIGGERED | TTC=N/A"
                 )
 
+                metrics_collector.record_brake_trigger(
+                    sim_time_s=onboard_timestamp,
+                    frame_id=onboard_frame_id,
+                    distance_m=brake_start_distance_m,
+                    ttc_s=brake_start_ttc_s,
+                    speed_mps=brake_start_speed_mps,
+                    hazard_level=control_pedestrian_hazard,
+                )
+
             if (
                 braking_command["braking_active"]
                 and not stop_reported
@@ -1335,6 +1399,33 @@ def main():
                     f"{actual_braking_distance:.2f}m | "
                     f"clearance={clearance_text} | "
                     f"hazard={control_pedestrian_hazard}"
+                )
+
+                final_clearance_m = (
+                    None
+                    if pedestrian_risk is None
+                    else pedestrian_risk["distance_m"]
+                )
+
+                metrics_collector.record_stop(
+                    sim_time_s=onboard_timestamp,
+                    frame_id=onboard_frame_id,
+                    actual_braking_distance_m=actual_braking_distance,
+                    final_clearance_m=final_clearance_m,
+                    hazard_level=control_pedestrian_hazard,
+                )
+
+                metrics_collector.export_summary_json(
+                    metrics_summary_path
+                )
+                metrics_collector.export_events_csv(
+                    metrics_events_path
+                )
+
+                print(
+                    "METRICS SAVED | "
+                    f"summary={metrics_summary_path.name} | "
+                    f"events={metrics_events_path.name}"
                 )
 
                 stop_reported = True
@@ -1494,6 +1585,16 @@ def main():
         print("\nStopping test...")
 
     finally:
+        try:
+            metrics_collector.export_summary_json(
+                metrics_summary_path
+            )
+            metrics_collector.export_events_csv(
+                metrics_events_path
+            )
+        except Exception as exc:
+            print(f"Metrics export warning: {exc}")
+
         try:
             csv_file.close()
         except Exception:
