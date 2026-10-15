@@ -58,7 +58,7 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
 
     # Never portray a recorded snapshot as currently LIVE.
-    stale_path = output / "driver_mode_v68_recorded.png"
+    stale_path = output / "driver_mode_v69_recorded.png"
     if not cv2.imwrite(str(stale_path), app.render(snapshot, stale=True)):
         raise RuntimeError(f"Failed to write {stale_path}")
 
@@ -66,7 +66,7 @@ def main() -> None:
     # layout, with an unmistakable PREVIEW pill instead of LIVE.
     layout_snapshot = dict(snapshot)
     layout_snapshot["_preview_recorded"] = True
-    layout_path = output / "driver_mode_v68_layout_preview.png"
+    layout_path = output / "driver_mode_v69_layout_preview.png"
     if not cv2.imwrite(
         str(layout_path), app.render(layout_snapshot, stale=False)
     ):
@@ -74,7 +74,7 @@ def main() -> None:
 
     segments = road.get("segments") or []
     junctions = sum(bool(s.get("junction")) for s in segments)
-    print("=== PERCEPTINET V6.8 ROAD VIEW ===")
+    print("=== PERCEPTINET V6.9 ROAD VIEW ===")
     print(f"Recorded snapshot: {path}")
     print(f"Map: {road.get('map_name', 'unknown')}")
     print(f"Road segments: {len(segments)}")
