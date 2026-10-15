@@ -720,7 +720,7 @@ def main():
     road_context_sampler = None
     try:
         road_context_sampler = RoadContextSampler(
-            world.get_map(), max_segments=180
+            world.get_map(), max_segments=320
         )
         print("CARLA road-context geometry cache ready")
     except Exception as exc:
