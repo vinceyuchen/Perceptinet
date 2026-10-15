@@ -58,7 +58,7 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
 
     # Never portray a recorded snapshot as currently LIVE.
-    stale_path = output / "driver_mode_v62_recorded.png"
+    stale_path = output / "driver_mode_v66_recorded.png"
     if not cv2.imwrite(str(stale_path), app.render(snapshot, stale=True)):
         raise RuntimeError(f"Failed to write {stale_path}")
 
@@ -66,7 +66,7 @@ def main() -> None:
     # layout, with an unmistakable PREVIEW pill instead of LIVE.
     layout_snapshot = dict(snapshot)
     layout_snapshot["_preview_recorded"] = True
-    layout_path = output / "driver_mode_v62_layout_preview.png"
+    layout_path = output / "driver_mode_v66_layout_preview.png"
     if not cv2.imwrite(
         str(layout_path), app.render(layout_snapshot, stale=False)
     ):
@@ -74,10 +74,21 @@ def main() -> None:
 
     segments = road.get("segments") or []
     junctions = sum(bool(s.get("junction")) for s in segments)
-    print("=== PERCEPTINET V6.2 ROAD VIEW ===")
+    print("=== PERCEPTINET V6.6 ROAD VIEW ===")
     print(f"Recorded snapshot: {path}")
     print(f"Map: {road.get('map_name', 'unknown')}")
     print(f"Road segments: {len(segments)}")
+    view = road.get("view_range_m") or {}
+    print(
+        "Snapshot coverage (recorded): "
+        f"forward {view.get('forward', '?')} m, "
+        f"behind {view.get('behind', '?')} m, "
+        f"side +/-{view.get('side', '?')} m"
+    )
+    print(
+        "Note: older saved snapshots retain their original CARLA "
+        "sampling range. The expanded range requires a fresh run."
+    )
     print(f"Junction-labelled segments: {junctions}")
     print(f"Recorded-data image: {stale_path}")
     print(f"Recorded layout illustration (PREVIEW): {layout_path}")
