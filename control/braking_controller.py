@@ -16,7 +16,7 @@ class BrakingConfig:
     # CAUTION is advisory only in the cooperative
     # braking demo. Automatic deceleration begins at WARNING.
     caution_decel_mps2: float = 0.0
-    warning_decel_mps2: float = 0.5
+    warning_decel_mps2: float = 1.5
     critical_decel_mps2: float = 6.0
 
     minimum_speed_mps: float = 0.0
@@ -34,7 +34,9 @@ class BrakingController:
         advisory only, no automatic braking
 
     WARNING:
-        controlled progressive braking
+        controlled progressive braking strong enough to
+        exploit early cooperative warning without allowing
+        prolonged low-deceleration creep
 
     CRITICAL:
         emergency braking
