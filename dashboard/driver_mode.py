@@ -399,6 +399,29 @@ class DriverModeRenderer:
             count += 1
         return count
 
+    def _active_primary(
+        self, snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Ignore a NORMAL-only or ego-overlap primary for Driver warnings.
+
+        Control state remains authoritative. This only decides whether an
+        individual object can be presented as its current risk target.
+        """
+        hazard = snapshot.get("hazard") or {}
+        if str(hazard.get("control_level", "NORMAL")).upper() not in {
+                "CAUTION", "WARNING", "CRITICAL"}:
+            return None
+        primary = hazard.get("primary")
+        if not isinstance(primary, dict):
+            return None
+        if str(primary.get("hazard_level", "NORMAL")).upper() not in {
+                "CAUTION", "WARNING", "CRITICAL"}:
+            return None
+        forward = self._finite(primary.get("longitudinal_m"))
+        if forward is None or forward <= 0.5:
+            return None
+        return primary
+
     def _draw_road(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                    stale: bool) -> None:
         road_context = snapshot.get("road_context")
@@ -430,10 +453,7 @@ class DriverModeRenderer:
 
         hazard = snapshot.get("hazard") or {}
         level = str(hazard.get("control_level", "NORMAL")).upper()
-        active_primary = (
-            hazard.get("primary") if level in ("CAUTION", "WARNING", "CRITICAL")
-            else None
-        )
+        active_primary = self._active_primary(snapshot)
         drawn_count = self._draw_detected_objects(
             canvas, snapshot, stale=stale, active_primary=active_primary
         )
@@ -464,17 +484,15 @@ class DriverModeRenderer:
         level = str(hazard.get("control_level", "NORMAL")).upper()
         # Avoid showing the first NORMAL risk as an active danger:
         # the data layer may pick an ego-overlap car in a NORMAL-only run.
-        primary = (
-            hazard.get("primary") if level in ("CAUTION", "WARNING", "CRITICAL")
-            else None
-        )
+        primary = self._active_primary(snapshot)
         color = MUTED if stale else self._hazard_color(level)
         self._put_text(canvas, "HAZARD", (875, 58),
                        scale=0.52, color=MUTED, thickness=1)
         self._fit_text(canvas, "LAST KNOWN" if stale else level,
                        (1098, 58), 134, 0.43, color, 2)
         klass = (str(primary.get("class_name") or "OBJECT").upper()
-                 if primary else "NO ACTIVE ALERT")
+                 if primary else ("TARGET UNCONFIRMED" if level != "NORMAL"
+                                  else "NO ACTIVE ALERT"))
         self._fit_text(canvas, klass, (875, 114), 347, 0.91,
                        color if primary else (MUTED if stale else GREEN), 2)
         self._put_text(canvas, "DISTANCE", (875, 157),
