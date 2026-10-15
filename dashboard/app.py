@@ -10,6 +10,7 @@ import numpy as np
 
 from .driver_mode import DriverModeRenderer
 from .pro_mode import ProModeRenderer
+from .ui_theme import draw_text, rounded_rect
 
 
 BACKGROUND = (10, 10, 10)
@@ -41,7 +42,7 @@ class PerceptinetDashboardApp:
     ):
         self.width = int(width)
         self.height = int(height)
-        self.nav_height = 58
+        self.nav_height = 52
 
         self.driver_renderer = DriverModeRenderer(
             width=1280,
@@ -60,15 +61,15 @@ class PerceptinetDashboardApp:
 
         self.driver_button = (
             self.width - 420,
-            9,
+            7,
             self.width - 225,
-            49,
+            45,
         )
         self.pro_button = (
             self.width - 215,
-            9,
+            7,
             self.width - 20,
-            49,
+            45,
         )
 
     @staticmethod
@@ -111,15 +112,13 @@ class PerceptinetDashboardApp:
         color: Tuple[int, int, int] = WHITE,
         thickness: int = 1,
     ) -> None:
-        cv2.putText(
+        draw_text(
             canvas,
-            str(text),
+            text,
             xy,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            scale,
-            color,
-            thickness,
-            cv2.LINE_AA,
+            scale=scale,
+            color=color,
+            thickness=thickness,
         )
 
     @staticmethod
@@ -174,19 +173,14 @@ class PerceptinetDashboardApp:
         fill = BLUE if active else (38, 38, 38)
         text_color = (10, 10, 10) if active else WHITE
 
-        cv2.rectangle(
+        rounded_rect(
             canvas,
             (x1, y1),
             (x2, y2),
-            fill,
-            -1,
-        )
-        cv2.rectangle(
-            canvas,
-            (x1, y1),
-            (x2, y2),
-            NAV_BORDER,
-            1,
+            fill=fill,
+            border=NAV_BORDER,
+            border_thickness=1,
+            radius=9,
         )
 
         text_size, _ = cv2.getTextSize(
@@ -300,11 +294,19 @@ class PerceptinetDashboardApp:
 
         self._put_text(
             canvas,
-            "PERCEPTINET DASHBOARD",
-            (22, 36),
-            scale=0.72,
+            "PERCEPTINET",
+            (22, 33),
+            scale=0.76,
             color=WHITE,
             thickness=2,
+        )
+        self._put_text(
+            canvas,
+            "COOPERATIVE PERCEPTION",
+            (190, 32),
+            scale=0.38,
+            color=MUTED,
+            thickness=1,
         )
 
         self._draw_button(
