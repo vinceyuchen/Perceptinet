@@ -1,3 +1,4 @@
+import copy
 import sys
 from pathlib import Path
 
@@ -112,12 +113,57 @@ def main():
 
     assert stopped_frame.shape == (720, 1280, 3)
 
+    # v6.2: a real-road geometry payload changes the map rendering.
+    road_context = copy.deepcopy(snapshot)
+    road_context["road_context"] = {
+        "version": 1,
+        "source": "carla_waypoints",
+        "coordinate_frame": "ego_relative_lateral_forward_m",
+        "segments": [
+            {"points": [[-1.5, 0], [-1.5, 30]], "width_m": 3.5,
+             "junction": False},
+            {"points": [[-15, 10], [15, 10]], "width_m": 3.5,
+             "junction": True},
+        ],
+    }
+    road_context["fusion"]["objects"] = [
+        {
+            "actor_id": 99, "class_name": "car",
+            "world_position": dict(snapshot["ego"]["world_position"]),
+            "sources": ["RSU-01"],
+        },
+        {
+            "actor_id": 46, "class_name": "pedestrian",
+            "world_position": {
+                "x": -52.0, "y": 26.5, "z": 0.9,
+            },
+            "sources": ["RSU-01"],
+        },
+    ]
+    geometry_frame = renderer.render(road_context)
+    assert geometry_frame.shape == frame.shape
+    assert (geometry_frame != frame).any()
+
+    # A NORMAL-only zero-distance car is not an actionable Driver hazard.
+    normal = copy.deepcopy(road_context)
+    normal["hazard"]["control_level"] = "NORMAL"
+    normal["hazard"]["primary"] = {
+        "actor_id": 99, "class_name": "car",
+        "hazard_level": "NORMAL",
+        "longitudinal_m": 0.0, "lateral_m": 0.0,
+        "distance_m": 0.0, "ttc_s": None,
+    }
+    assert renderer._active_primary(normal) is None
+    assert renderer.render(normal).shape == frame.shape
+    assert renderer.render(normal, stale=True).shape == frame.shape
+
     print("=== Perceptinet Driver Mode v1 Test ===")
     print("Resolution: 1280x720")
     print("Hazard card: WARNING")
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
+    print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
 
