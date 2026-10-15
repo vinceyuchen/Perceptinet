@@ -27,6 +27,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent
@@ -215,6 +216,12 @@ def main(argv=None) -> int:
     STOP_FILE.unlink(missing_ok=True)
     CYCLE_FILE.unlink(missing_ok=True)
 
+    session_dir = Path(tempfile.mkdtemp(
+        prefix="session_", dir=str(SIGNALS)
+    ))
+    live_snapshot = session_dir / "dashboard_snapshot.json"
+    print("Demo snapshot:", live_snapshot)
+
     server = None
     scenario = None
     dashboard = None
@@ -223,7 +230,7 @@ def main(argv=None) -> int:
         server = launch_carla_if_needed(args)
         dashboard = subprocess.Popen(
             [sys.executable, str(DASHBOARD),
-             "--snapshot", str(SNAPSHOT),
+             "--snapshot", str(live_snapshot),
              "--width", str(args.dashboard_width),
              "--height", str(args.dashboard_height),
              "--mode", "driver", "--stale-seconds", "2.5"],
@@ -254,6 +261,7 @@ def main(argv=None) -> int:
             # Unique per-cycle artifacts avoid Windows Excel/file locks.
             # The live dashboard continues watching results/dashboard_snapshot.json.
             env["PERCEPTINET_DEMO_CYCLE_INDEX"] = str(rounds + 1)
+            env["PERCEPTINET_DEMO_SNAPSHOT_FILE"] = str(live_snapshot)
             env["PERCEPTINET_DEMO_STOP_FILE"] = str(STOP_FILE)
             env["PERCEPTINET_DEMO_CYCLE_FILE"] = str(CYCLE_FILE)
             env["PERCEPTINET_DEMO_STOP_HOLD_SECONDS"] = str(args.hold_seconds)
