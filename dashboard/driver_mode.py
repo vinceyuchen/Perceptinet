@@ -361,6 +361,13 @@ class DriverModeRenderer:
             if not (-8 <= forward <= 52 and abs(lateral) <= 24):
                 continue
             class_name = str(obj.get("class_name") or "OBJECT").upper()
+            # YOLO's raw 'person' and legacy 'motorbike' names can appear
+            # in snapshots. Normalize *display* labels without modifying
+            # detection, fusion or risk-engine object records.
+            class_name = {
+                "PERSON": "PEDESTRIAN",
+                "MOTORBIKE": "MOTORCYCLE",
+            }.get(class_name, class_name)
             if class_name not in {"PEDESTRIAN", "CAR", "TRUCK", "BUS",
                                   "MOTORCYCLE", "BICYCLE"}:
                 continue
