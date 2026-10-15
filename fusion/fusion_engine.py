@@ -114,9 +114,8 @@ class FusionEngine:
         if (
             actor_a is not None
             and actor_b is not None
-            and actor_a == actor_b
         ):
-            return True
+            return actor_a == actor_b
 
         pos_a = self._world_position(a)
         pos_b = self._world_position(b)
@@ -224,12 +223,17 @@ class FusionEngine:
     ) -> Optional[str]:
         actor_track_id = self._actor_track_id(obj)
 
-        if (
-            actor_track_id is not None
-            and actor_track_id in self._tracks
-            and actor_track_id not in claimed_track_ids
-        ):
-            return actor_track_id
+        if actor_track_id is not None:
+            if (
+                actor_track_id in self._tracks
+                and actor_track_id not in claimed_track_ids
+            ):
+                return actor_track_id
+
+            # In the CARLA prototype, a real actor_id is authoritative.
+            # Never merge two different actor IDs merely because they are
+            # spatially close.
+            return None
 
         best_track_id = None
         best_distance = None
