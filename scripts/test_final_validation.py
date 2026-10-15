@@ -72,12 +72,13 @@ def build_baseline():
             ego_speed_mps=4.0,
         )
 
-    tracker.mark_motion_guard(
-        distance_m=1.9,
+    tracker.mark_system_stop(
+        final_clearance_m=3.2,
+        actual_braking_distance_m=1.4,
     )
 
-    # Make the final evaluation ground-truth minimum reflect the guard point.
-    tracker.min_clearance_m = 1.9
+    tracker.min_clearance_m = 3.2
+    tracker.ego_travelled_m = 8.2
 
     return tracker.build_summary(
         pipeline_metrics=pipeline_metrics(),
@@ -108,9 +109,12 @@ def build_cooperative():
         hazard_level="WARNING",
     )
     tracker.mark_system_stop(
-        final_clearance_m=4.2,
-        actual_braking_distance_m=5.7,
+        final_clearance_m=5.4,
+        actual_braking_distance_m=4.6,
     )
+
+    tracker.min_clearance_m = 5.4
+    tracker.ego_travelled_m = 6.8
 
     return tracker.build_summary(
         pipeline_metrics=pipeline_metrics(
@@ -123,7 +127,7 @@ def main():
     baseline = build_baseline()
     cooperative = build_cooperative()
 
-    assert baseline["outcome"] == "NEAR_MISS"
+    assert baseline["outcome"] == "LATE_LOCAL_STOP"
     assert cooperative["outcome"] == "SAFE_STOP"
 
     assert (
@@ -144,7 +148,9 @@ def main():
 
     assert pair["pair_pass"] is True
     assert pair["clearance_gain_m"] > 0.0
+    assert pair["travel_distance_saved_m"] > 0.0
     assert pair["cooperative_rsu_detection_lead_s"] == 0.8
+    assert pair["baseline_failure_demonstrated"] is False
 
     suite = build_suite_summary([pair])
 
