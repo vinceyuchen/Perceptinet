@@ -271,12 +271,17 @@ class DriverModeRenderer:
 
     def _draw_fallback_road(self, canvas: np.ndarray) -> None:
         """Minimal parallel street boundaries when no CARLA map is available."""
-        # Align the no-map fallback with the same v6.6 road projection.
+        # Extend the fallback corridor to the Road View edges too.
+        # Keep all drawing clipped below the title and inside the card.
+        left, top, right, bottom = 54, 142, 800, 682
+        panel = canvas[top:bottom, left:right]
         for lateral in (-5.4, 5.4):
-            start = self._road_projection(lateral, -6.0)
-            end = self._road_projection(lateral, 46.0)
+            start = self._road_projection(lateral, -12.0)
+            end = self._road_projection(lateral, 62.0)
             cv2.line(
-                canvas, start, end,
+                panel,
+                (start[0] - left, start[1] - top),
+                (end[0] - left, end[1] - top),
                 (149, 156, 164), 2, cv2.LINE_AA,
             )
 
