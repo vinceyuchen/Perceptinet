@@ -292,3 +292,202 @@ def badge(
     )
 
     return rect
+
+
+def _rotated_points(
+    center: Tuple[int, int],
+    points: np.ndarray,
+    heading_deg: float,
+) -> np.ndarray:
+    """
+    Rotate local 2D marker points around centre.
+
+    heading_deg=0 points upward on screen, matching the Ego-forward direction
+    used by the Driver and Pro spatial views.
+    """
+    angle = np.deg2rad(float(heading_deg))
+    cos_a = float(np.cos(angle))
+    sin_a = float(np.sin(angle))
+
+    rotated = np.empty_like(points, dtype=np.float32)
+    rotated[:, 0] = (
+        points[:, 0] * cos_a
+        - points[:, 1] * sin_a
+    )
+    rotated[:, 1] = (
+        points[:, 0] * sin_a
+        + points[:, 1] * cos_a
+    )
+
+    rotated[:, 0] += float(center[0])
+    rotated[:, 1] += float(center[1])
+
+    return np.round(rotated).astype(np.int32)
+
+
+def draw_navigation_marker(
+    canvas: np.ndarray,
+    center: Tuple[int, int],
+    *,
+    size: int = 18,
+    color: Color = TEXT_PRIMARY,
+    heading_deg: float = 0.0,
+    halo: bool = True,
+) -> None:
+    """
+    Premium navigation-style Ego marker.
+
+    The tapered chevron gives an immediate forward-direction cue and replaces
+    the debug-style rectangular Ego box used in early dashboard versions.
+    """
+    cx, cy = map(int, center)
+    s = max(8, int(size))
+
+    if halo:
+        cv2.circle(
+            canvas,
+            (cx, cy),
+            s + 8,
+            SURFACE_3,
+            -1,
+            cv2.LINE_AA,
+        )
+        cv2.circle(
+            canvas,
+            (cx, cy),
+            s + 8,
+            BORDER,
+            1,
+            cv2.LINE_AA,
+        )
+
+    # A navigation cursor with a small inward notch, similar to modern
+    # automotive/map self-position indicators.
+    local = np.array(
+        [
+            [0.0, -1.00 * s],
+            [0.68 * s, 0.72 * s],
+            [0.0, 0.42 * s],
+            [-0.68 * s, 0.72 * s],
+        ],
+        dtype=np.float32,
+    )
+
+    points = _rotated_points(
+        (cx, cy),
+        local,
+        heading_deg,
+    )
+
+    cv2.fillConvexPoly(
+        canvas,
+        points,
+        color,
+        cv2.LINE_AA,
+    )
+
+    inner = np.array(
+        [
+            [0.0, -0.48 * s],
+            [0.28 * s, 0.30 * s],
+            [0.0, 0.16 * s],
+            [-0.28 * s, 0.30 * s],
+        ],
+        dtype=np.float32,
+    )
+    inner_points = _rotated_points(
+        (cx, cy),
+        inner,
+        heading_deg,
+    )
+
+    cv2.fillConvexPoly(
+        canvas,
+        inner_points,
+        SURFACE_1,
+        cv2.LINE_AA,
+    )
+
+
+def draw_object_marker(
+    canvas: np.ndarray,
+    center: Tuple[int, int],
+    class_name: str,
+    *,
+    color: Color,
+    size: int = 16,
+    primary: bool = False,
+) -> None:
+    """
+    Shared fused-object visual language.
+
+    Pedestrians use a ring + centre point. Road vehicles use a compact
+    top-down capsule with a short front indicator. This makes vehicle objects
+    visually distinct from pedestrians without relying only on text labels.
+    """
+    cx, cy = map(int, center)
+    s = max(8, int(size))
+    name = str(class_name or "object").lower()
+
+    if name == "pedestrian":
+        radius = s + (3 if primary else 0)
+        cv2.circle(
+            canvas,
+            (cx, cy),
+            radius,
+            color,
+            2 if not primary else 3,
+            cv2.LINE_AA,
+        )
+        cv2.circle(
+            canvas,
+            (cx, cy),
+            max(3, s // 4),
+            color,
+            -1,
+            cv2.LINE_AA,
+        )
+        return
+
+    vehicle_classes = {
+        "car",
+        "bus",
+        "truck",
+        "motorcycle",
+        "bicycle",
+    }
+
+    if name in vehicle_classes:
+        width = int(round(s * (1.10 if name in {"truck", "bus"} else 0.90)))
+        height = int(round(s * (1.55 if name in {"truck", "bus"} else 1.30)))
+
+        rounded_rect(
+            canvas,
+            (cx - width, cy - height),
+            (cx + width, cy + height),
+            fill=SURFACE_2,
+            border=color,
+            border_thickness=2 if primary else 1,
+            radius=max(4, width // 2),
+        )
+
+        # Small front mark makes the glyph read as a top-down vehicle.
+        cv2.line(
+            canvas,
+            (cx - width // 2, cy - height + 4),
+            (cx + width // 2, cy - height + 4),
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+        return
+
+    radius = s + (2 if primary else 0)
+    cv2.circle(
+        canvas,
+        (cx, cy),
+        radius,
+        color,
+        2 if not primary else 3,
+        cv2.LINE_AA,
+    )
