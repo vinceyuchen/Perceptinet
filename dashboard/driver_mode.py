@@ -54,6 +54,53 @@ class DriverModeRenderer:
         except (TypeError, ValueError):
             return default
 
+    def _is_stopped(
+        self,
+        snapshot: Dict[str, Any],
+    ) -> bool:
+        ego = snapshot.get("ego") or {}
+        braking = snapshot.get("braking") or {}
+
+        speed_mps = self._number(
+            ego.get("speed_mps"),
+            0.0,
+        ) or 0.0
+
+        target_speed_mps = self._number(
+            braking.get("target_speed_mps")
+        )
+
+        if target_speed_mps is None:
+            return speed_mps <= 0.05
+
+        return (
+            speed_mps <= 0.05
+            and target_speed_mps <= 0.05
+        )
+
+    def _vehicle_action(
+        self,
+        snapshot: Dict[str, Any],
+    ) -> str:
+        braking = snapshot.get("braking") or {}
+        braking_state = str(
+            braking.get("state", "DRIVING")
+        )
+
+        if self._is_stopped(snapshot):
+            return "STOPPED"
+
+        if braking.get("emergency"):
+            return "EMERGENCY BRAKING"
+
+        if braking.get("active"):
+            return "SLOWING"
+
+        if braking_state == "STOPPED_HOLD":
+            return "STOPPED"
+
+        return "DRIVING"
+
     @staticmethod
     def _hazard_color(level: str) -> Tuple[int, int, int]:
         return HAZARD_COLORS.get(
@@ -585,23 +632,12 @@ class DriverModeRenderer:
             thickness=1,
         )
 
-        braking_state = str(
-            braking.get("state", "DRIVING")
-        )
-
-        if braking.get("emergency"):
-            action = "EMERGENCY BRAKING"
-        elif braking.get("active"):
-            action = "SLOWING"
-        elif braking_state == "STOPPED_HOLD":
-            action = "STOPPED"
-        else:
-            action = "DRIVING"
+        action = self._vehicle_action(snapshot)
 
         action_color = (
-            color
-            if action != "DRIVING"
-            else GREEN
+            GREEN
+            if action in ("DRIVING", "STOPPED")
+            else color
         )
 
         self._put_text(
@@ -736,7 +772,17 @@ class DriverModeRenderer:
             hazard.get("control_level", "NORMAL")
         ).upper()
 
-        if level == "CRITICAL":
+        primary = hazard.get("primary")
+        stopped = self._is_stopped(snapshot)
+
+        if stopped and primary:
+            class_name = str(
+                primary.get("class_name") or "hazard"
+            ).upper()
+            message = f"VEHICLE STOPPED - {class_name} AHEAD"
+        elif stopped:
+            message = "VEHICLE STOPPED"
+        elif level == "CRITICAL":
             message = "BRAKE NOW - IMMINENT COLLISION RISK"
         elif level == "WARNING":
             message = "HAZARD AHEAD - VEHICLE SLOWING"
