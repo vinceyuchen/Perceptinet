@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from .ui_theme import badge, draw_text, rounded_rect
+
 
 WHITE = (240, 240, 240)
 MUTED = (155, 155, 155)
@@ -68,15 +70,13 @@ class ProModeRenderer:
         color: Tuple[int, int, int] = WHITE,
         thickness: int = 1,
     ) -> None:
-        cv2.putText(
+        draw_text(
             canvas,
-            str(text),
+            text,
             xy,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            scale,
-            color,
-            thickness,
-            cv2.LINE_AA,
+            scale=scale,
+            color=color,
+            thickness=thickness,
         )
 
     @staticmethod
@@ -85,8 +85,15 @@ class ProModeRenderer:
         p1: Tuple[int, int],
         p2: Tuple[int, int],
     ) -> None:
-        cv2.rectangle(canvas, p1, p2, PANEL, -1)
-        cv2.rectangle(canvas, p1, p2, (55, 55, 55), 1)
+        rounded_rect(
+            canvas,
+            p1,
+            p2,
+            fill=PANEL,
+            border=(52, 52, 52),
+            border_thickness=1,
+            radius=10,
+        )
 
     @staticmethod
     def read_snapshot(
@@ -843,37 +850,51 @@ class ProModeRenderer:
             selected = source == self.selected_source
             contributor = source in primary_sources
 
+            if selected:
+                rounded_rect(
+                    canvas,
+                    (1070, y - 20),
+                    (1560, y + 8),
+                    fill=(31, 38, 42),
+                    radius=7,
+                )
+
             prefix = ">" if selected else " "
-            text = f"{prefix} {source:<10} objects={count}"
+            text = f"{prefix} {source:<10} {count} object{'s' if count != 1 else ''}"
 
             self._put_text(
                 canvas,
                 text,
                 (1080, y),
-                scale=0.48,
+                scale=0.46,
                 color=BLUE if selected else WHITE,
                 thickness=2 if selected else 1,
             )
 
-            badges: List[str] = []
+            badge_x = 1315
 
             if source == first_source:
-                badges.append("FIRST DETECTION")
+                rect = badge(
+                    canvas,
+                    "FIRST DETECTION",
+                    (badge_x, y),
+                    fill=AMBER,
+                    foreground=(10, 10, 10),
+                    scale=0.29,
+                )
+                badge_x = rect[2] + 7
 
             if contributor:
-                badges.append("CONTRIBUTOR")
-
-            if badges:
-                self._put_text(
+                badge(
                     canvas,
-                    " | ".join(badges),
-                    (1325, y),
-                    scale=0.30,
-                    color=AMBER if source == first_source else BLUE,
-                    thickness=2,
+                    "CONTRIBUTOR",
+                    (badge_x, y),
+                    fill=BLUE,
+                    foreground=(10, 10, 10),
+                    scale=0.29,
                 )
 
-            y += 30
+            y += 32
 
         self._put_text(
             canvas,
@@ -915,27 +936,40 @@ class ProModeRenderer:
 
         for label, key in fields:
             value = self._number(latency.get(key))
-            value_text = "N/A" if value is None else f"{value:7.2f} ms"
+            value_text = "N/A" if value is None else f"{value:.2f} ms"
+
+            if key == "end_to_end_latency_ms":
+                cv2.line(
+                    canvas,
+                    (1080, y - 12),
+                    (1550, y - 12),
+                    GRID,
+                    1,
+                )
 
             self._put_text(
                 canvas,
                 label,
                 (1080, y),
-                scale=0.41,
-                color=MUTED,
+                scale=0.42,
+                color=WHITE if key == "end_to_end_latency_ms" else MUTED,
+                thickness=2 if key == "end_to_end_latency_ms" else 1,
             )
             self._put_text(
                 canvas,
                 value_text,
-                (1390, y),
-                scale=0.43,
+                (1415, y),
+                scale=0.45,
                 color=(
-                    AMBER
+                    BLUE
+                    if key == "end_to_end_latency_ms"
+                    else AMBER
                     if value is not None
                     and key == "v2i_latency_ms"
                     and value > 50.0
                     else WHITE
                 ),
+                thickness=2 if key == "end_to_end_latency_ms" else 1,
             )
             y += 22
 
@@ -957,16 +991,9 @@ class ProModeRenderer:
         decel = self._number(braking.get("deceleration_mps2"), 0.0) or 0.0
         ttc = self._number(primary.get("ttc_s"))
 
-        target_text = (
-            "N/A"
-            if target is None
-            else f"{target:.2f}"
-        )
-        ttc_text = (
-            "N/A"
-            if ttc is None
-            else f"{ttc:.2f}s"
-        )
+        target_text = "N/A" if target is None else f"{target:.2f}"
+        ttc_text = "N/A" if ttc is None else f"{ttc:.2f}s"
+        brake_state = str(braking.get("state", "N/A"))
 
         self._put_text(
             canvas,
@@ -976,36 +1003,47 @@ class ProModeRenderer:
             thickness=2,
         )
 
+        state_color = (
+            AMBER
+            if bool(braking.get("active"))
+            else GREEN
+        )
+
         self._put_text(
             canvas,
-            (
-                f"Speed {speed:.2f} m/s | "
-                f"target {target_text} m/s | TTC {ttc_text}"
-            ),
-            (1080, 628),
-            scale=0.38,
+            brake_state,
+            (1080, 630),
+            scale=0.48,
+            color=state_color,
+            thickness=2,
         )
         self._put_text(
             canvas,
-            (
-                f"Brake {braking.get('state', 'N/A')} | "
-                f"active={bool(braking.get('active'))} | "
-                f"decel {decel:.2f} m/s^2"
-            ),
-            (1080, 652),
-            scale=0.36,
+            f"{speed:.2f} m/s  ->  {target_text} m/s",
+            (1280, 630),
+            scale=0.42,
+            color=WHITE,
+            thickness=1,
         )
+
         self._put_text(
             canvas,
-            (
-                "Hazard observed "
-                f"{hazard.get('observed_level', 'NORMAL')} | "
-                "control "
-                f"{hazard.get('control_level', 'NORMAL')}"
-            ),
-            (1080, 676),
+            f"TTC {ttc_text}   |   decel {decel:.2f} m/s^2",
+            (1080, 654),
             scale=0.38,
             color=MUTED,
+        )
+
+        observed = str(hazard.get("observed_level", "NORMAL"))
+        control = str(hazard.get("control_level", "NORMAL"))
+
+        self._put_text(
+            canvas,
+            f"Observed {observed}   |   Control {control}",
+            (1080, 678),
+            scale=0.38,
+            color=self._hazard_color(control),
+            thickness=1,
         )
 
     @staticmethod
@@ -1062,103 +1100,151 @@ class ProModeRenderer:
 
         self._put_text(
             canvas,
-            "EVENT TIMELINE",
+            "COOPERATIVE EVENT TIMELINE",
             (45, 742),
             scale=0.58,
             thickness=2,
         )
-        self._put_text(
-            canvas,
-            "event",
-            (45, 770),
-            scale=0.38,
-            color=MUTED,
-        )
-        self._put_text(
-            canvas,
-            "frame",
-            (360, 770),
-            scale=0.38,
-            color=MUTED,
-        )
-        self._put_text(
-            canvas,
-            "sim time",
-            (500, 770),
-            scale=0.38,
-            color=MUTED,
-        )
-        self._put_text(
-            canvas,
-            "detail",
-            (690, 770),
-            scale=0.38,
-            color=MUTED,
+
+        events = list(snapshot.get("timeline") or [])
+        latency = snapshot.get("latency_ms") or {}
+        fused = snapshot.get("fusion") or {}
+        braking = snapshot.get("braking") or {}
+
+        has_rsu_detection = any(
+            str(event.get("event_type")) == "stable_detection"
+            and str(
+                event.get("source_id")
+                or event.get("source")
+                or ""
+            ).upper().startswith("RSU")
+            for event in events
         )
 
-        events = list(snapshot.get("timeline") or [])[-5:]
-        y = 798
+        has_v2i = (
+            has_rsu_detection
+            and self._number(latency.get("v2i_latency_ms")) is not None
+        )
 
-        if not events:
+        has_fusion = (
+            has_rsu_detection
+            and int(fused.get("object_count", 0) or 0) > 0
+        )
+
+        has_warning = any(
+            str(event.get("event_type")) == "hazard_transition"
+            and str(event.get("new_level", "")).upper()
+            in {"WARNING", "CRITICAL"}
+            for event in events
+        )
+
+        has_brake = any(
+            str(event.get("event_type")) == "brake_trigger"
+            for event in events
+        ) or bool(braking.get("active"))
+
+        has_safe_stop = any(
+            str(event.get("event_type")) == "vehicle_stopped"
+            for event in events
+        ) or str(braking.get("state", "")).upper().startswith("STOPPED")
+
+        steps = [
+            ("RSU DETECT", has_rsu_detection, BLUE),
+            ("V2I", has_v2i, BLUE),
+            ("FUSION", has_fusion, BLUE),
+            ("WARNING", has_warning, AMBER),
+            ("BRAKE", has_brake, AMBER),
+            ("SAFE STOP", has_safe_stop, GREEN),
+        ]
+
+        start_x = 115
+        end_x = 1485
+        step_y = 798
+        gap = (end_x - start_x) / (len(steps) - 1)
+
+        cv2.line(
+            canvas,
+            (start_x, step_y),
+            (end_x, step_y),
+            GRID,
+            3,
+            cv2.LINE_AA,
+        )
+
+        for index, (label, complete, color) in enumerate(steps):
+            x = int(round(start_x + index * gap))
+
+            if index > 0 and complete:
+                previous_x = int(
+                    round(start_x + (index - 1) * gap)
+                )
+                cv2.line(
+                    canvas,
+                    (previous_x, step_y),
+                    (x, step_y),
+                    color,
+                    3,
+                    cv2.LINE_AA,
+                )
+
+            node_color = color if complete else (85, 85, 85)
+
+            cv2.circle(
+                canvas,
+                (x, step_y),
+                11,
+                node_color,
+                -1,
+                cv2.LINE_AA,
+            )
+            cv2.circle(
+                canvas,
+                (x, step_y),
+                15,
+                node_color,
+                2,
+                cv2.LINE_AA,
+            )
+
             self._put_text(
                 canvas,
-                "No significant events yet",
-                (45, 820),
-                scale=0.48,
+                label,
+                (x - 48, 775),
+                scale=0.34,
+                color=node_color,
+                thickness=2 if complete else 1,
+            )
+
+        latest = events[-1] if events else None
+
+        if latest is not None:
+            event_type = str(latest.get("event_type", "event"))
+            detail = self._timeline_detail(latest)
+            sim_time = self._number(latest.get("sim_time_s"))
+
+            latest_text = f"Latest: {event_type}"
+
+            if detail:
+                latest_text += f" | {detail}"
+
+            if sim_time is not None:
+                latest_text += f" | {sim_time:.2f}s"
+
+            self._put_text(
+                canvas,
+                latest_text,
+                (45, 856),
+                scale=0.39,
                 color=MUTED,
             )
-            return
-
-        for event in events:
-            event_type = str(
-                event.get("event_type", "event")
-            )
-            frame_id = event.get("frame_id", "")
-            sim_time = self._number(event.get("sim_time_s"))
-            detail = self._timeline_detail(event)
-
-            event_color = (
-                GREEN
-                if event_type == "vehicle_stopped"
-                else AMBER
-                if event_type in {
-                    "hazard_transition",
-                    "brake_trigger",
-                }
-                else BLUE
-            )
-
+        else:
             self._put_text(
                 canvas,
-                event_type,
-                (45, y),
-                scale=0.40,
-                color=event_color,
-            )
-            self._put_text(
-                canvas,
-                str(frame_id),
-                (360, y),
-                scale=0.40,
-            )
-            self._put_text(
-                canvas,
-                (
-                    "N/A"
-                    if sim_time is None
-                    else f"{sim_time:.2f}s"
-                ),
-                (500, y),
-                scale=0.40,
-            )
-            self._put_text(
-                canvas,
-                detail,
-                (690, y),
-                scale=0.40,
+                "Waiting for significant cooperative perception events",
+                (45, 856),
+                scale=0.39,
                 color=MUTED,
             )
-            y += 22
 
     def render(
         self,
