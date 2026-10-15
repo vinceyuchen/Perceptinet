@@ -235,12 +235,53 @@ class DashboardDataLayer:
         primary_hazard = None
 
         if primary_risk is not None:
+            primary_actor_id = primary_risk.get(
+                "actor_id"
+            )
+
+            matching_fused_object = next(
+                (
+                    obj
+                    for obj in (
+                        fused_world.get("objects", [])
+                        or []
+                    )
+                    if obj.get("actor_id")
+                    == primary_actor_id
+                ),
+                None,
+            )
+
+            stable_sources = self._clean_sources(
+                (
+                    matching_fused_object
+                    or {}
+                ).get("display_sources")
+            )
+
+            if not stable_sources:
+                stable_sources = self._clean_sources(
+                    primary_risk.get("sources")
+                )
+
+            display_world_position = (
+                (
+                    matching_fused_object
+                    or {}
+                ).get("display_world_position")
+                or primary_risk.get("world_position")
+            )
+
             primary_hazard = {
                 "class_name": primary_risk.get("class_name"),
-                "actor_id": primary_risk.get("actor_id"),
-                "sources": self._clean_sources(
-                    primary_risk.get("sources")
+                "actor_id": primary_actor_id,
+                "track_id": (
+                    (
+                        matching_fused_object
+                        or {}
+                    ).get("track_id")
                 ),
+                "sources": stable_sources,
                 "distance_m": self._number(
                     primary_risk.get("distance_m")
                 ),
@@ -257,9 +298,8 @@ class DashboardDataLayer:
                     "hazard_level",
                     "NORMAL",
                 ),
-                "world_position": primary_risk.get(
-                    "world_position"
-                ),
+                "world_position":
+                    display_world_position,
             }
 
         braking = {
