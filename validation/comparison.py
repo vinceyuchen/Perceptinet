@@ -152,6 +152,21 @@ def compare_pair(
         and rsu_occ > onboard_occ
     )
 
+    early_detection_advantage = (
+        rsu_lead is not None
+        and rsu_lead > 0.0
+    )
+
+    clearance_advantage = (
+        clearance_gain is not None
+        and clearance_gain > 0.0
+    )
+
+    travel_advantage = (
+        travel_saved is not None
+        and travel_saved > 0.0
+    )
+
     return {
         "pair_id": pair_id,
         "baseline_run_id": baseline.get("run_id"),
@@ -211,12 +226,18 @@ def compare_pair(
         "cooperative_safe_stop": cooperative_safe_stop,
         "baseline_failure_demonstrated": baseline_failure,
         "perception_advantage_demonstrated": perception_advantage,
+        "early_detection_advantage_demonstrated":
+            early_detection_advantage,
+        "clearance_advantage_demonstrated":
+            clearance_advantage,
+        "travel_advantage_demonstrated":
+            travel_advantage,
         "pair_pass": (
             cooperative_safe_stop
-            and baseline_failure
             and perception_advantage
-            and clearance_gain is not None
-            and clearance_gain > 0.0
+            and early_detection_advantage
+            and clearance_advantage
+            and travel_advantage
         ),
     }
 
@@ -430,11 +451,14 @@ def write_report(
         "Interpretation",
         "--------------",
         (
-            "A paired trial passes when the baseline demonstrates the "
-            "blind-spot failure mode, the cooperative run achieves a safe "
-            "stop, RSU perception outperforms onboard perception during the "
-            "scenario-defined occlusion window, and cooperative clearance "
-            "is greater than baseline minimum clearance."
+            "A paired trial passes when the cooperative run achieves a "
+            "safe stop, RSU perception outperforms onboard perception during "
+            "the scenario-defined occlusion window, RSU stable detection is "
+            "earlier than onboard stable detection, cooperative final "
+            "clearance is greater than baseline minimum clearance, and the "
+            "cooperative run travels less distance before stopping. The "
+            "baseline is allowed to achieve a late local stop; it does not "
+            "need to be forced into an artificial collision or near-miss."
         ),
         "",
         (
