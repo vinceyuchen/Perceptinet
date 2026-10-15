@@ -119,12 +119,19 @@ def main():
         "version": 1,
         "source": "carla_waypoints",
         "coordinate_frame": "ego_relative_lateral_forward_m",
-        "segments": [
-            {"points": [[-1.5, 0], [-1.5, 30]], "width_m": 3.5,
-             "junction": False},
-            {"points": [[-15, 10], [15, 10]], "width_m": 3.5,
-             "junction": True},
-        ],
+        "segments": (
+            [
+                {"points": [[-1.5, float(fwd)],
+                            [-1.5, float(fwd + 3)]],
+                 "width_m": 3.5, "junction": False}
+                for fwd in range(-6, 33, 3)
+            ] + [
+                {"points": [[float(lat), 10.0],
+                            [float(lat + 3), 10.0]],
+                 "width_m": 3.5, "junction": True}
+                for lat in range(-15, 15, 3)
+            ]
+        ),
     }
     road_context["fusion"]["objects"] = [
         {
@@ -144,7 +151,7 @@ def main():
     assert geometry_frame.shape == frame.shape
     assert (geometry_frame != frame).any()
 
-    # v6.3 road view: only boundary pixels, never filled asphalt.
+    # v6.5: only smoothed, fixed-width schematic road boundaries.
     # At a synthetic crossroad, the centre of both roads remains clear.
     import numpy as np
     map_only = np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -154,8 +161,9 @@ def main():
     assert not np.any(map_only[488, 430])  # Intersection interior
     assert not np.any(map_only[488, 500])  # Cross street interior
     assert not np.any(map_only[488, 200])  # Outside street
-    assert np.any(map_only[343:358, 390:407])  # Left vertical edge
-    assert np.any(map_only[463:479, 491:509])  # Upper cross-street edge
+    assert np.any(map_only[335:349, 367:375])  # Main left boundary
+    assert np.any(map_only[335:349, 455:465])  # Main right boundary
+    assert np.any(map_only[437:450, 290:320])  # Cross-road boundary
 
     # Fallback without CARLA data is also only two parallel road lines.
     fallback_only = np.zeros_like(map_only)
@@ -190,7 +198,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
-    print("CARLA road outline-only and recorded preview status: OK")
+    print("CARLA fixed-width road centerlines and recorded preview: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
