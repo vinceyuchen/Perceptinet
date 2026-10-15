@@ -23,6 +23,8 @@ from .ui_theme import (
     TEXT_PRIMARY,
     TEXT_SECONDARY,
     WARNING,
+    draw_navigation_marker,
+    draw_object_marker,
     draw_text,
     rounded_rect,
 )
@@ -448,19 +450,21 @@ class DriverModeRenderer:
         )
 
         if cooperative:
-            cv2.rectangle(
+            rounded_rect(
                 canvas,
-                (55, 594),
-                (280, 616),
-                BLUE,
-                -1,
+                (55, 591),
+                (280, 617),
+                fill=SURFACE_3,
+                border=BLUE,
+                border_thickness=1,
+                radius=7,
             )
             self._put_text(
                 canvas,
                 "COOPERATIVE DETECTION",
-                (65, 611),
-                scale=0.38,
-                color=(10, 10, 10),
+                (66, 610),
+                scale=0.36,
+                color=BLUE,
                 thickness=1,
             )
 
@@ -525,21 +529,22 @@ class DriverModeRenderer:
                 2,
             )
 
-        # Ego vehicle
+        # Ego vehicle. Use a navigation cursor rather than a debug box.
         ego_y = road_bottom_y - 42
-        cv2.rectangle(
+        draw_navigation_marker(
             canvas,
-            (center_x - 28, ego_y - 24),
-            (center_x + 28, ego_y + 24),
-            WHITE,
-            2,
+            (center_x, ego_y),
+            size=18,
+            color=WHITE,
+            heading_deg=0.0,
+            halo=True,
         )
         self._put_text(
             canvas,
             "EGO",
-            (center_x - 19, ego_y + 6),
-            scale=0.42,
-            color=WHITE,
+            (center_x - 17, ego_y + 40),
+            scale=0.34,
+            color=MUTED,
             thickness=1,
         )
 
@@ -597,30 +602,26 @@ class DriverModeRenderer:
             + (lat_clamped / 4.0) * 120
         )
 
-        radius = 22 if level != "CRITICAL" else 28
-
-        cv2.circle(
-            canvas,
-            (hazard_x, hazard_y),
-            radius,
-            color,
-            3,
+        class_name = str(
+            primary.get("class_name")
+            or "object"
         )
-        cv2.circle(
+
+        marker_size = 20 if level != "CRITICAL" else 24
+
+        draw_object_marker(
             canvas,
             (hazard_x, hazard_y),
-            6,
-            color,
-            -1,
+            class_name,
+            color=color,
+            size=marker_size,
+            primary=True,
         )
 
         self._put_text(
             canvas,
-            str(
-                primary.get("class_name")
-                or "object"
-            ).upper(),
-            (hazard_x + 32, hazard_y + 6),
+            class_name.upper(),
+            (hazard_x + 34, hazard_y + 6),
             scale=0.5,
             color=color,
             thickness=2,
@@ -628,10 +629,11 @@ class DriverModeRenderer:
 
         cv2.line(
             canvas,
-            (center_x, ego_y - 25),
-            (hazard_x, hazard_y + radius),
+            (center_x, ego_y - 22),
+            (hazard_x, hazard_y + marker_size),
             color,
             1,
+            cv2.LINE_AA,
         )
 
     def _draw_action_panel(
