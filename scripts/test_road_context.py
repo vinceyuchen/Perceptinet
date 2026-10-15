@@ -51,6 +51,9 @@ def main():
     })
     assert east["source"] == "carla_waypoints"
     assert east["coordinate_frame"] == "ego_relative_lateral_forward_m"
+    assert east["view_range_m"] == {
+        "forward": 50.0, "behind": 10.0, "side": 24.0
+    }
     assert len(east["segments"]) == 2
     assert any(s["junction"] for s in east["segments"])
     assert any(
