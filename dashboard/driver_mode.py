@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
+from .presentation_state import derive_presentation_state
 from .ui_theme import (
     BACKGROUND,
     BORDER,
@@ -101,24 +102,12 @@ class DriverModeRenderer:
         self,
         snapshot: Dict[str, Any],
     ) -> str:
-        braking = snapshot.get("braking") or {}
-        braking_state = str(
-            braking.get("state", "DRIVING")
+        return str(
+            derive_presentation_state(
+                snapshot,
+                stale=False,
+            )["vehicle_action"]
         )
-
-        if self._is_stopped(snapshot):
-            return "STOPPED"
-
-        if braking.get("emergency"):
-            return "EMERGENCY BRAKING"
-
-        if braking.get("active"):
-            return "SLOWING"
-
-        if braking_state == "STOPPED_HOLD":
-            return "STOPPED"
-
-        return "DRIVING"
 
     @staticmethod
     def _hazard_color(level: str) -> Tuple[int, int, int]:
@@ -232,10 +221,13 @@ class DriverModeRenderer:
             thickness=1,
         )
 
-        status_text = (
-            "LIVE"
-            if not stale
-            else "DATA STALE"
+        presentation = derive_presentation_state(
+            snapshot,
+            stale=stale,
+        )
+
+        status_text = str(
+            presentation["data_status"]
         )
 
         status_color = GREEN if not stale else CAUTION
@@ -640,6 +632,8 @@ class DriverModeRenderer:
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         self._panel(
             canvas,
@@ -649,7 +643,10 @@ class DriverModeRenderer:
 
         hazard = snapshot.get("hazard") or {}
         braking = snapshot.get("braking") or {}
-        health = snapshot.get("system_health") or {}
+        presentation = derive_presentation_state(
+            snapshot,
+            stale=stale,
+        )
 
         level = str(
             hazard.get("control_level", "NORMAL")
@@ -665,7 +662,9 @@ class DriverModeRenderer:
             thickness=1,
         )
 
-        action = self._vehicle_action(snapshot)
+        action = str(
+            presentation["vehicle_action"]
+        )
 
         action_color = (
             GREEN
@@ -704,13 +703,6 @@ class DriverModeRenderer:
                 thickness=2,
             )
 
-        primary = hazard.get("primary")
-        sources = (
-            list(primary.get("sources") or [])
-            if primary
-            else []
-        )
-
         self._put_text(
             canvas,
             "PERCEPTION",
@@ -720,19 +712,13 @@ class DriverModeRenderer:
             thickness=1,
         )
 
-        cooperative = any(
-            str(source).upper().startswith("RSU")
-            for source in sources
+        cooperative = bool(
+            presentation["cooperative_active"]
         )
 
-        perception_text = (
-            "RSU + ONBOARD"
-            if cooperative
-            else "ONBOARD"
+        perception_text = str(
+            presentation["perception_text"]
         )
-
-        if cooperative:
-            perception_text = "COOPERATIVE ACTIVE"
 
         self._put_text(
             canvas,
@@ -744,7 +730,7 @@ class DriverModeRenderer:
         )
 
         health_status = str(
-            health.get("status", "UNKNOWN")
+            presentation["display_health"]
         )
 
         self._put_text(
@@ -764,6 +750,8 @@ class DriverModeRenderer:
             color=(
                 GREEN
                 if health_status == "HEALTHY"
+                else CAUTION
+                if stale
                 else color
             ),
             thickness=2,
@@ -791,6 +779,8 @@ class DriverModeRenderer:
         self,
         canvas: np.ndarray,
         snapshot: Dict[str, Any],
+        *,
+        stale: bool = False,
     ) -> None:
         cv2.rectangle(
             canvas,
@@ -800,29 +790,17 @@ class DriverModeRenderer:
             -1,
         )
 
-        hazard = snapshot.get("hazard") or {}
+        presentation = derive_presentation_state(
+            snapshot,
+            stale=stale,
+        )
+
         level = str(
-            hazard.get("control_level", "NORMAL")
-        ).upper()
-
-        primary = hazard.get("primary")
-        stopped = self._is_stopped(snapshot)
-
-        if stopped and primary:
-            class_name = str(
-                primary.get("class_name") or "hazard"
-            ).upper()
-            message = f"VEHICLE STOPPED - {class_name} AHEAD"
-        elif stopped:
-            message = "VEHICLE STOPPED"
-        elif level == "CRITICAL":
-            message = "BRAKE NOW - IMMINENT COLLISION RISK"
-        elif level == "WARNING":
-            message = "HAZARD AHEAD - VEHICLE SLOWING"
-        elif level == "CAUTION":
-            message = "COOPERATIVE HAZARD DETECTED AHEAD"
-        else:
-            message = "COOPERATIVE PERCEPTION ACTIVE"
+            presentation["hazard_level"]
+        )
+        message = str(
+            presentation["footer_message"]
+        )
 
         self._put_text(
             canvas,
@@ -853,7 +831,15 @@ class DriverModeRenderer:
         self._draw_speed(canvas, snapshot)
         self._draw_hazard_card(canvas, snapshot)
         self._draw_spatial_view(canvas, snapshot)
-        self._draw_action_panel(canvas, snapshot)
-        self._draw_footer(canvas, snapshot)
+        self._draw_action_panel(
+            canvas,
+            snapshot,
+            stale=stale,
+        )
+        self._draw_footer(
+            canvas,
+            snapshot,
+            stale=stale,
+        )
 
         return canvas
