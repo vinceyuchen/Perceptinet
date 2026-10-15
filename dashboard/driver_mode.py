@@ -385,7 +385,7 @@ class DriverModeRenderer:
                        scale=0.87, color=WHITE, thickness=2)
         self._put_text(
             canvas,
-            "CARLA ROAD CORRIDORS / SCHEMATIC" if map_available
+            "CARLA ROAD CENTERLINES / SCHEMATIC" if map_available
             else "EGO-RELATIVE ROAD SCHEMATIC",
             (55, 102), scale=0.37, color=MUTED, thickness=1,
         )
@@ -399,10 +399,6 @@ class DriverModeRenderer:
                     (652, 76), foreground=CAUTION if stale or snapshot.get("_preview_recorded") else GREEN,
                     fill=(47, 45, 46), border=(85, 73, 67),
                     scale=0.40, height=29)
-        for meters in (10, 20, 30):
-            x, y = self._road_projection(0.0, float(meters))
-            self._put_text(canvas, f"{meters} m", (119, y+5),
-                           scale=0.38, color=MUTED, thickness=1)
         cx, ego_y = self._road_projection(0.0, 0.0)
         draw_navigation_marker(canvas, (cx, ego_y), size=24,
                                color=MUTED if stale else WHITE,
