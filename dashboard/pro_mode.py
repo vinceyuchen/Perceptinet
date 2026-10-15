@@ -29,6 +29,7 @@ from .ui_theme import (
     draw_object_marker,
     draw_text,
     rounded_rect,
+    status_pill,
 )
 
 
@@ -301,13 +302,17 @@ class ProModeRenderer:
         live_text = str(
             presentation["data_status"]
         )
-        self._put_text(
+
+        status_pill(
             canvas,
             live_text,
-            (1120, 34),
-            scale=0.58,
-            color=GREEN if not stale else AMBER,
-            thickness=2,
+            (1100, 35),
+            foreground=GREEN if not stale else AMBER,
+            fill=SURFACE_2,
+            border=BORDER_SOFT,
+            scale=0.38,
+            height=25,
+            dot=True,
         )
 
         rounded_rect(
