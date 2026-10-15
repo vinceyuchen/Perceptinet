@@ -734,12 +734,16 @@ def main():
         fusion_distance_m=2.0,
         temporal_max_missed_frames=2,
         confidence_ema_alpha=0.65,
+        display_position_ema_alpha=0.45,
+        display_source_hold_frames=2,
     )
 
     print(
         "Fusion engine enabled | "
         "temporal coast=2 frames | "
-        "stable track IDs enabled"
+        "stable track IDs enabled | "
+        "display position EMA=0.45 | "
+        "source hold=2 frames"
     )
 
     risk_engine = RiskEngine(
