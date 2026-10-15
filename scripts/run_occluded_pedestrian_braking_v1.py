@@ -318,8 +318,8 @@ def main():
 
     braking_controller = BrakingController(
         BrakingConfig(
-            caution_decel_mps2=0.75,
-            warning_decel_mps2=2.0,
+            caution_decel_mps2=0.0,
+            warning_decel_mps2=0.5,
             critical_decel_mps2=6.0,
         )
     )
@@ -327,9 +327,14 @@ def main():
     # Persistent kinematic speed command.
     ego_command_speed_mps = EGO_TEST_SPEED_MPS
 
-    # Conservative v1 hazard latch.
-    # A one-frame detector dropout must not cancel braking.
+    # Cooperative braking hazard state.
+    #
+    # CAUTION is advisory and is never permanently latched.
+    # WARNING and CRITICAL are safety-relevant braking states
+    # and remain latched so that a one-frame perception dropout
+    # cannot suddenly release the brakes.
     latched_pedestrian_hazard = "NORMAL"
+    last_observed_pedestrian_hazard = "NORMAL"
 
     hazard_priority = {
         "NORMAL": 0,
@@ -1128,29 +1133,58 @@ def main():
                     pedestrian_risk["hazard_level"]
                 )
 
-                # Keep the highest pedestrian hazard observed.
-                if (
-                    hazard_priority[
-                        observed_pedestrian_hazard
-                    ]
-                    >
-                    hazard_priority[
-                        latched_pedestrian_hazard
-                    ]
-                ):
-                    print(
-                        "HAZARD TRANSITION | "
-                        f"{latched_pedestrian_hazard} -> "
-                        f"{observed_pedestrian_hazard}"
-                    )
+            # Log the raw RiskEngine state independently from
+            # the braking state used by the controller.
+            if (
+                observed_pedestrian_hazard
+                != last_observed_pedestrian_hazard
+            ):
+                print(
+                    "HAZARD OBSERVED | "
+                    f"{last_observed_pedestrian_hazard} -> "
+                    f"{observed_pedestrian_hazard}"
+                )
 
-                    latched_pedestrian_hazard = (
-                        observed_pedestrian_hazard
-                    )
+                last_observed_pedestrian_hazard = (
+                    observed_pedestrian_hazard
+                )
+
+            # CAUTION is advisory only.
+            #
+            # Start safety latching at WARNING so detector
+            # dropouts cannot release an active braking event.
+            if (
+                hazard_priority[observed_pedestrian_hazard]
+                >= hazard_priority["WARNING"]
+                and
+                hazard_priority[observed_pedestrian_hazard]
+                > hazard_priority[latched_pedestrian_hazard]
+            ):
+                print(
+                    "HAZARD LATCH | "
+                    f"{latched_pedestrian_hazard} -> "
+                    f"{observed_pedestrian_hazard}"
+                )
+
+                latched_pedestrian_hazard = (
+                    observed_pedestrian_hazard
+                )
+
+            if (
+                hazard_priority[latched_pedestrian_hazard]
+                >= hazard_priority["WARNING"]
+            ):
+                control_pedestrian_hazard = (
+                    latched_pedestrian_hazard
+                )
+            else:
+                control_pedestrian_hazard = (
+                    observed_pedestrian_hazard
+                )
 
             braking_command = braking_controller.update(
                 current_speed_mps=ego_speed_this_tick_mps,
-                hazard_level=latched_pedestrian_hazard,
+                hazard_level=control_pedestrian_hazard,
                 dt_s=fixed_delta,
             )
 
@@ -1205,7 +1239,7 @@ def main():
 
                 print(
                     "BRAKE TRIGGERED | "
-                    f"hazard={latched_pedestrian_hazard} | "
+                    f"hazard={control_pedestrian_hazard} | "
                     f"speed={brake_start_speed_mps:.2f}m/s | "
                     f"distance="
                     f"{brake_start_distance_m:.2f}m | "
@@ -1229,7 +1263,7 @@ def main():
 
                 print(
                     f'BRAKE | '
-                    f'hazard={latched_pedestrian_hazard} | '
+                    f'hazard={control_pedestrian_hazard} | '
                     f'speed='
                     f'{braking_command["speed_before_mps"]:.2f}'
                     f'->'
@@ -1264,7 +1298,7 @@ def main():
                     f"actual_braking_distance="
                     f"{actual_braking_distance:.2f}m | "
                     f"clearance={clearance_text} | "
-                    f"hazard={latched_pedestrian_hazard}"
+                    f"hazard={control_pedestrian_hazard}"
                 )
 
                 stop_reported = True

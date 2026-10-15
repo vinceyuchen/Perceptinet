@@ -16,8 +16,8 @@ def main():
 
     controller = BrakingController(
         BrakingConfig(
-            caution_decel_mps2=0.75,
-            warning_decel_mps2=2.0,
+            caution_decel_mps2=0.0,
+            warning_decel_mps2=0.5,
             critical_decel_mps2=6.0,
         )
     )
@@ -64,8 +64,8 @@ def main():
         f'decel={caution["deceleration_mps2"]:.2f}m/s^2'
     )
 
-    assert caution["target_speed_mps"] < initial_speed
-    assert caution["braking_active"] is True
+    assert caution["target_speed_mps"] == initial_speed
+    assert caution["braking_active"] is False
 
     # --------------------------------------------------------
     # WARNING
@@ -87,6 +87,7 @@ def main():
         warning["target_speed_mps"]
         < caution["target_speed_mps"]
     )
+    assert warning["braking_active"] is True
 
     # --------------------------------------------------------
     # CRITICAL emergency braking simulation

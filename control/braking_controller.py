@@ -13,8 +13,10 @@ class BrakingConfig:
     They are not validated production vehicle braking limits.
     """
 
-    caution_decel_mps2: float = 0.75
-    warning_decel_mps2: float = 2.0
+    # CAUTION is advisory only in the cooperative
+    # braking demo. Automatic deceleration begins at WARNING.
+    caution_decel_mps2: float = 0.0
+    warning_decel_mps2: float = 0.5
     critical_decel_mps2: float = 6.0
 
     minimum_speed_mps: float = 0.0
@@ -29,10 +31,10 @@ class BrakingController:
         no braking
 
     CAUTION:
-        light deceleration
+        advisory only, no automatic braking
 
     WARNING:
-        strong deceleration
+        controlled progressive braking
 
     CRITICAL:
         emergency braking
