@@ -172,6 +172,7 @@ class DashboardDataLayer:
         metrics_summary: Optional[Dict[str, Any]] = None,
         metrics_events: Optional[Iterable[Dict[str, Any]]] = None,
         live_latencies: Optional[Dict[str, Any]] = None,
+        road_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         primary_risk = self._primary_risk(risk_result)
 
@@ -334,7 +335,7 @@ class DashboardDataLayer:
 
         metrics = metrics_summary or {}
 
-        return {
+        snapshot = {
             "schema_version": "dashboard-v1",
             "frame_id": frame_id,
             "sim_time_s": sim_time_s,
@@ -378,6 +379,11 @@ class DashboardDataLayer:
                 limit=self.max_timeline_events,
             ),
         }
+        # Optional read-only CARLA road geometry. The field remains absent
+        # in older snapshots and previews, preserving backward compatibility.
+        if road_context is not None:
+            snapshot["road_context"] = road_context
+        return snapshot
 
     @staticmethod
     def write_snapshot_json(
@@ -467,6 +473,7 @@ class DashboardDataLayer:
         braking_state: str,
         control_hazard: Optional[str] = None,
         live_latencies: Optional[Dict[str, Any]] = None,
+        road_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return self.build_snapshot(
             frame_id=frame_id,
@@ -484,4 +491,5 @@ class DashboardDataLayer:
                 events_path
             ),
             live_latencies=live_latencies,
+            road_context=road_context,
         )
