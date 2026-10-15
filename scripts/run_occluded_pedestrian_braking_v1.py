@@ -25,6 +25,7 @@ from fusion.fusion_engine import FusionEngine
 from risk.risk_engine import RiskEngine, RiskConfig
 from control.braking_controller import BrakingController, BrakingConfig
 from metrics.collector import MetricsCollector
+from dashboard.data_layer import DashboardDataLayer
 
 
 # Deterministic kinematic Ego motion for Risk Transition v1.
@@ -289,9 +290,16 @@ def main():
     csv_path = results_dir / "occluded_pedestrian_world_v1.csv"
     metrics_summary_path = results_dir / "metrics_summary.json"
     metrics_events_path = results_dir / "metrics_events.csv"
+    dashboard_snapshot_path = (
+        results_dir / "dashboard_snapshot.json"
+    )
 
     metrics_collector = MetricsCollector(
         stable_detection_frames=3
+    )
+
+    dashboard_data_layer = DashboardDataLayer(
+        max_timeline_events=20
     )
 
     model_path = Path(YOLO_MODEL_PATH)
@@ -326,6 +334,7 @@ def main():
     )
 
     print("Risk engine enabled")
+    print("Dashboard data layer enabled")
 
     braking_controller = BrakingController(
         BrakingConfig(
@@ -1435,6 +1444,50 @@ def main():
                 print(
                     "BRAKING STATE | DRIVING -> STOPPED_HOLD"
                 )
+
+            # ------------------------------------------------
+            # Live Dashboard Data Layer v1
+            #
+            # Publish one normalized snapshot consumed by both
+            # Driver Mode and Pro Mode. Raw metrics remain
+            # separate from the filtered dashboard timeline.
+            # ------------------------------------------------
+
+            dashboard_snapshot = (
+                dashboard_data_layer.build_snapshot(
+                    frame_id=onboard_frame_id,
+                    sim_time_s=onboard_timestamp,
+                    ego_state=ego_state,
+                    fused_world=fused_world,
+                    risk_result=risk_result,
+                    braking_command=braking_command,
+                    braking_state=braking_state,
+                    control_hazard=control_pedestrian_hazard,
+                    metrics_summary=metrics_collector.summary(),
+                    metrics_events=metrics_collector.events(),
+                    live_latencies={
+                        "onboard_inference_ms":
+                            onboard_packet["inference_ms"],
+                        "rsu_inference_ms":
+                            rsu_packet["inference_ms"],
+                        "v2i_latency_ms":
+                            rsu_packet["v2i"]["latency_ms"],
+                        "fusion_latency_ms":
+                            fusion_latency_ms,
+                        "risk_latency_ms":
+                            risk_latency_ms,
+                        "control_latency_ms":
+                            control_latency_ms,
+                        "end_to_end_latency_ms":
+                            end_to_end_latency_ms,
+                    },
+                )
+            )
+
+            dashboard_data_layer.write_snapshot_json(
+                dashboard_snapshot,
+                dashboard_snapshot_path,
+            )
 
             if pedestrian_risk is not None:
                 ttc = pedestrian_risk["ttc_s"]
