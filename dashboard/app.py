@@ -176,17 +176,17 @@ class PerceptinetDashboardApp:
         label: str,
         *,
         active: bool,
-        light: bool = False,
+        driver_mono: bool = False,
     ) -> None:
         x1, y1, x2, y2 = rect
 
         # Premium segmented-control treatment. Avoid a large bright selected
         # block: active state is indicated by a slightly raised graphite
         # surface plus a thin neutral underline.
-        if light:
-            fill = (228, 228, 228) if active else (246, 246, 246)
-            text_color = (33, 33, 33) if active else (95, 95, 95)
-            outline = (116, 116, 116) if active else (197, 197, 197)
+        if driver_mono:
+            fill = (46, 46, 46) if active else (23, 23, 23)
+            text_color = (245, 245, 245) if active else (174, 174, 174)
+            outline = (196, 196, 196) if active else (67, 67, 67)
         else:
             fill = SURFACE_3 if active else NAV
             text_color = WHITE if active else MUTED
@@ -207,7 +207,7 @@ class PerceptinetDashboardApp:
                 canvas,
                 (x1 + 18, y2 - 3),
                 (x2 - 18, y2 - 3),
-                (84, 84, 84) if light else SELECTED,
+                (219, 219, 219) if driver_mono else SELECTED,
                 2,
                 cv2.LINE_AA,
             )
@@ -270,10 +270,10 @@ class PerceptinetDashboardApp:
         *,
         stale: bool = False,
     ) -> np.ndarray:
-        light = self.mode == self.DRIVER_MODE
+        driver_mono = self.mode == self.DRIVER_MODE
         canvas = np.full(
             (self.height, self.width, 3),
-            (231, 231, 231) if light else BACKGROUND,
+            (13, 13, 13) if driver_mono else BACKGROUND,
             dtype=np.uint8,
         )
 
@@ -311,14 +311,14 @@ class PerceptinetDashboardApp:
             canvas,
             (0, 0),
             (self.width, self.nav_height),
-            (247, 247, 247) if light else NAV,
+            (20, 20, 20) if driver_mono else NAV,
             -1,
         )
         cv2.line(
             canvas,
             (0, self.nav_height - 1),
             (self.width, self.nav_height - 1),
-            (192, 192, 192) if light else NAV_BORDER,
+            (65, 65, 65) if driver_mono else NAV_BORDER,
             1,
         )
 
@@ -327,7 +327,7 @@ class PerceptinetDashboardApp:
             "PERCEPTINET",
             (22, 33),
             scale=0.76,
-            color=(35, 35, 35) if light else WHITE,
+            color=(248, 248, 248) if driver_mono else WHITE,
             thickness=2,
         )
         self._put_text(
@@ -335,7 +335,7 @@ class PerceptinetDashboardApp:
             "COOPERATIVE PERCEPTION",
             (190, 32),
             scale=0.38,
-            color=(112, 112, 112) if light else MUTED,
+            color=(171, 171, 171) if driver_mono else MUTED,
             thickness=1,
         )
 
@@ -344,14 +344,14 @@ class PerceptinetDashboardApp:
             self.driver_button,
             "DRIVER MODE",
             active=self.mode == self.DRIVER_MODE,
-            light=light,
+            driver_mono=driver_mono,
         )
         self._draw_button(
             canvas,
             self.pro_button,
             "PRO MODE",
             active=self.mode == self.PRO_MODE,
-            light=light,
+            driver_mono=driver_mono,
         )
 
         return canvas
