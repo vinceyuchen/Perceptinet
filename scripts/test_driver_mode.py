@@ -144,16 +144,25 @@ def main():
     assert geometry_frame.shape == frame.shape
     assert (geometry_frame != frame).any()
 
-    # Roadway must be a single filled union, not individually outlined
-    # round-capped segments that create scalloped junction blobs.
+    # v6.3 road view: only boundary pixels, never filled asphalt.
+    # At a synthetic crossroad, the centre of both roads remains clear.
     import numpy as np
     map_only = np.zeros((720, 1280, 3), dtype=np.uint8)
     assert renderer._draw_context_roads(
         map_only, road_context["road_context"]
     )
-    assert tuple(map_only[488, 430]) == (52, 50, 53)
-    assert tuple(map_only[488, 500]) == (52, 50, 53)
-    assert tuple(map_only[488, 200]) == (0, 0, 0)
+    assert not np.any(map_only[488, 430])  # Intersection interior
+    assert not np.any(map_only[488, 500])  # Cross street interior
+    assert not np.any(map_only[488, 200])  # Outside street
+    assert np.any(map_only[343:358, 390:407])  # Left vertical edge
+    assert np.any(map_only[463:479, 491:509])  # Upper cross-street edge
+
+    # Fallback without CARLA data is also only two parallel road lines.
+    fallback_only = np.zeros_like(map_only)
+    renderer._draw_fallback_road(fallback_only)
+    assert not np.any(fallback_only[390, 430])
+    assert np.any(fallback_only[390, 385])
+    assert np.any(fallback_only[390, 475])
 
     # A saved frame can be viewed in normal colors but must say PREVIEW,
     # not LIVE, when explicitly marked as recorded.
@@ -181,7 +190,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
-    print("Merged CARLA road mask and recorded preview status: OK")
+    print("CARLA road outline-only and recorded preview status: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
