@@ -1,4 +1,5 @@
 import argparse
+import ctypes
 import sys
 import time
 from pathlib import Path
@@ -35,7 +36,7 @@ def parse_args():
     parser.add_argument(
         "--height",
         type=int,
-        default=900,
+        default=952,
     )
     parser.add_argument(
         "--stale-seconds",
@@ -50,8 +51,22 @@ def parse_args():
     return parser.parse_args()
 
 
+def enable_high_dpi():
+    if sys.platform != "win32":
+        return
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 def main():
     args = parse_args()
+    enable_high_dpi()
 
     app = PerceptinetDashboardApp(
         width=args.width,
