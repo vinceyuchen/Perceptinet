@@ -1,10 +1,9 @@
-"""CARLA-free regression for v6.4 line-only road corridor display."""
+"""CARLA-free tests for v6.5 smoothed centerline road schematic."""
 
 import math
 import sys
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,15 +13,19 @@ if str(ROOT) not in sys.path:
 from dashboard.road_corridors import draw_road_corridors
 
 
-def main():
-    segments = []
+def project(lat, fwd):
+    return (int(round(430 + lat * 10.0)),
+            int(round(590 - fwd * 10.2)))
 
-    # Two multi-lane roads crossing in Ego's local reference frame.
+
+def make_junction():
+    segments = []
+    # Three centerline tracks share a single forward road corridor.
     for lateral in (-3.5, 0.0, 3.5):
         for forward in np.arange(-8.0, 40.0, 3.0):
             segments.append({
                 "points": [[float(lateral), float(forward)],
-                           [float(lateral), float(forward+3.0)]],
+                           [float(lateral), float(forward + 3)]],
                 "width_m": 3.5,
                 "junction": True,
             })
@@ -30,47 +33,67 @@ def main():
         for lateral in np.arange(-18.0, 18.0, 3.0):
             segments.append({
                 "points": [[float(lateral), float(forward)],
-                           [float(lateral+3.0), float(forward)]],
+                           [float(lateral + 3), float(forward)]],
                 "width_m": 3.5,
                 "junction": True,
             })
-
-    # Short curved turning connectors must not create extra street prongs.
+    # Short curved turning links should not create unwanted street spurs.
     for angle in np.linspace(0, math.pi / 2, 12):
-        next_angle = angle + math.pi / 24
+        nxt = angle + math.pi / 24
         segments.append({
             "points": [
-                [7.0+6*math.cos(angle), 18.0+6*math.sin(angle)],
-                [7.0+6*math.cos(next_angle), 18.0+6*math.sin(next_angle)]
+                [7 + 6 * math.cos(angle), 18 + 6 * math.sin(angle)],
+                [7 + 6 * math.cos(nxt), 18 + 6 * math.sin(nxt)],
             ],
             "width_m": 3.5,
             "junction": True,
         })
+    return segments
 
-    view = np.zeros((720, 1280, 3), dtype=np.uint8)
-    project = lambda lat, fwd: (
-        int(round(430 + lat * 10.0)),
-        int(round(590 - fwd * 10.2)),
-    )
 
-    assert draw_road_corridors(view, segments, project)
-    # No asphalt/ground/terrain fill: road interior remains transparent.
-    assert not np.any(view[335, 430])
-    assert not np.any(view[488, 430])
-    # Left/right edge of long road visible outside the intersection.
-    assert np.any(view[330:342, 374:384])
-    assert np.any(view[330:342, 479:489])
-    # Cross-street edge visible left and right of the intersection.
-    assert np.any(view[424:437, 294:307])
-    assert np.any(view[533:541, 570:585])
-    # The boundary lines stop inside the junction rather than crossing it.
-    assert not np.any(view[482:495, 374:384])
-    # Tiny cap on total pixels catches regressions to filled surfaces.
-    assert np.count_nonzero(view[:, :, 0]) < 15000
+def main():
+    segments = make_junction()
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    assert draw_road_corridors(frame, segments, project)
 
-    empty = np.zeros_like(view)
+    # The main road uses fixed +/-4.5m edges, independent of the number
+    # and actual widths of sampled CARLA driving lanes.
+    assert np.any(frame[334:346, 381:389])
+    assert np.any(frame[334:346, 471:479])
+    assert np.any(frame[429:438, 300:316])
+    assert np.any(frame[532:544, 570:584])
+    # No road interior, terrain or junction line crossing.
+    assert not np.any(frame[488, 430])
+    assert not np.any(frame[488, 385])
+    assert not np.any(frame[488, 475])
+    assert not np.any(frame[340, 430])
+    assert np.count_nonzero(frame[:, :, 0]) < 20000
+
+    wider = [dict(s, width_m=7.0) for s in segments]
+    wider_frame = np.zeros_like(frame)
+    assert draw_road_corridors(wider_frame, wider, project)
+    assert np.array_equal(frame, wider_frame)
+
+    # A curved road can be smoothed without inventing a perpendicular street.
+    curved = []
+    for forward in np.arange(-7.0, 39.0, 3.0):
+        lat = 0.0085 * (forward - 10) ** 2
+        next_lat = 0.0085 * (forward - 7) ** 2
+        curved.append({
+            "points": [[float(lat), float(forward)],
+                       [float(next_lat), float(forward + 3)]],
+            "width_m": 3.5,
+        })
+    curve_frame = np.zeros_like(frame)
+    assert draw_road_corridors(curve_frame, curved, project)
+    assert not np.any(curve_frame[590, 430])
+
+    empty = np.zeros_like(frame)
     assert not draw_road_corridors(empty, [], project)
-    print("LINE-ONLY ROAD CORRIDOR TEST PASSED")
+    assert not draw_road_corridors(
+        empty, [{"points": [[float("nan"), 0], [0, 1]]}], project
+    )
+    print("V6.5 CENTERLINE ROAD CORRIDOR TEST PASSED")
 
 
 if __name__ == "__main__":
