@@ -491,6 +491,7 @@ def snap_actor_bbox_to_road(
     world_map,
     label,
     *,
+    reference_transform=None,
     clearance_m=SCENE_GROUND_CLEARANCE_M,
 ):
     """
@@ -502,7 +503,14 @@ def snap_actor_bbox_to_road(
     bounding-box vertices handles both conventions consistently.
     """
 
-    transform = actor.get_transform()
+    # Actors spawned during the current synchronous frame can briefly report
+    # the identity transform until CARLA advances. Use the known spawn
+    # transform as the authoritative XY/yaw reference when supplied.
+    transform = (
+        reference_transform
+        if reference_transform is not None
+        else actor.get_transform()
+    )
 
     waypoint = world_map.get_waypoint(
         transform.location,
@@ -1032,20 +1040,27 @@ def main():
 
         print("Ground snapping scene to road surface...")
 
+        ego_spawn_transform = ego_transform
+        truck_spawn_transform = occluder_transform
+        pedestrian_spawn_transform = pedestrian_transform
+
         ego_transform = snap_actor_bbox_to_road(
             ego_vehicle,
             world_map,
             "Ego Vehicle",
+            reference_transform=ego_spawn_transform,
         )
         occluder_transform = snap_actor_bbox_to_road(
             occluder_vehicle,
             world_map,
             "Occluding Vehicle",
+            reference_transform=truck_spawn_transform,
         )
         pedestrian_transform = snap_actor_bbox_to_road(
             pedestrian,
             world_map,
             "Pedestrian",
+            reference_transform=pedestrian_spawn_transform,
         )
 
         # Let transform updates become visible to sensors/snapshots.
@@ -1067,6 +1082,44 @@ def main():
             f"{pedestrian_transform.location.y:.2f}, "
             f"{pedestrian_transform.location.z:.2f})"
         )
+
+        def xy_error(actual, expected):
+            return math.hypot(
+                actual.location.x - expected.location.x,
+                actual.location.y - expected.location.y,
+            )
+
+        ego_snap_xy_error_m = xy_error(
+            ego_transform,
+            ego_spawn_transform,
+        )
+        truck_snap_xy_error_m = xy_error(
+            occluder_transform,
+            truck_spawn_transform,
+        )
+        pedestrian_snap_xy_error_m = xy_error(
+            pedestrian_transform,
+            pedestrian_spawn_transform,
+        )
+
+        print(
+            "Road snap XY preservation | "
+            f"ego={ego_snap_xy_error_m:.4f}m | "
+            f"truck={truck_snap_xy_error_m:.4f}m | "
+            f"pedestrian={pedestrian_snap_xy_error_m:.4f}m"
+        )
+
+        if max(
+            ego_snap_xy_error_m,
+            truck_snap_xy_error_m,
+            pedestrian_snap_xy_error_m,
+        ) > 0.05:
+            raise RuntimeError(
+                "Road grounding changed scenario XY geometry: "
+                f"ego={ego_snap_xy_error_m:.3f}m, "
+                f"truck={truck_snap_xy_error_m:.3f}m, "
+                f"pedestrian={pedestrian_snap_xy_error_m:.3f}m"
+            )
 
         # Rebuild the Ego right vector from the final grounded heading so all
         # geometry checks use the same frame as motion and risk.
