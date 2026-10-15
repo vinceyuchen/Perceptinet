@@ -90,11 +90,34 @@ def main():
 
     assert critical_frame.shape == (720, 1280, 3)
 
+    stopped = dict(snapshot)
+    stopped["ego"] = dict(snapshot["ego"])
+    stopped["ego"]["speed_mps"] = 0.0
+    stopped["hazard"] = dict(snapshot["hazard"])
+    stopped["hazard"]["control_level"] = "NORMAL"
+    stopped["hazard"]["primary"] = dict(
+        snapshot["hazard"]["primary"]
+    )
+    stopped["hazard"]["primary"]["ttc_s"] = None
+    stopped["braking"] = dict(snapshot["braking"])
+    stopped["braking"]["state"] = "DRIVING"
+    stopped["braking"]["active"] = False
+    stopped["braking"]["emergency"] = False
+    stopped["braking"]["target_speed_mps"] = 0.0
+
+    assert renderer._is_stopped(stopped) is True
+    assert renderer._vehicle_action(stopped) == "STOPPED"
+
+    stopped_frame = renderer.render(stopped)
+
+    assert stopped_frame.shape == (720, 1280, 3)
+
     print("=== Perceptinet Driver Mode v1 Test ===")
     print("Resolution: 1280x720")
     print("Hazard card: WARNING")
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
+    print("Safe-stop state render: STOPPED")
     print("DRIVER MODE TEST PASSED")
 
 
