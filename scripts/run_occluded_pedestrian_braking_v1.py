@@ -731,10 +731,16 @@ def main():
     print("V2I channel: 25 ms base latency +/- 5 ms jitter")
 
     fusion_engine = FusionEngine(
-        fusion_distance_m=2.0
+        fusion_distance_m=2.0,
+        temporal_max_missed_frames=2,
+        confidence_ema_alpha=0.65,
     )
 
-    print("Fusion engine enabled")
+    print(
+        "Fusion engine enabled | "
+        "temporal coast=2 frames | "
+        "stable track IDs enabled"
+    )
 
     risk_engine = RiskEngine(
         RiskConfig(
