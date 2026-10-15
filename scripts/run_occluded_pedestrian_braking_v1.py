@@ -433,7 +433,7 @@ def main():
     braking_controller = BrakingController(
         BrakingConfig(
             caution_decel_mps2=0.0,
-            warning_decel_mps2=0.5,
+            warning_decel_mps2=1.5,
             critical_decel_mps2=6.0,
         )
     )
@@ -478,7 +478,7 @@ def main():
     )
     print(
         "Braking controller: "
-        "CAUTION=0.0, WARNING=0.5, CRITICAL=6.0 m/s^2"
+        "CAUTION=0.0, WARNING=1.5, CRITICAL=6.0 m/s^2"
     )
     print("World-coordinate association enabled")
 
