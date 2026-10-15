@@ -144,6 +144,24 @@ def main():
     assert geometry_frame.shape == frame.shape
     assert (geometry_frame != frame).any()
 
+    # Roadway must be a single filled union, not individually outlined
+    # round-capped segments that create scalloped junction blobs.
+    import numpy as np
+    map_only = np.zeros((720, 1280, 3), dtype=np.uint8)
+    assert renderer._draw_context_roads(
+        map_only, road_context["road_context"]
+    )
+    assert tuple(map_only[488, 430]) == (52, 50, 53)
+    assert tuple(map_only[488, 500]) == (52, 50, 53)
+    assert tuple(map_only[488, 200]) == (0, 0, 0)
+
+    # A saved frame can be viewed in normal colors but must say PREVIEW,
+    # not LIVE, when explicitly marked as recorded.
+    recorded = copy.deepcopy(road_context)
+    recorded["_preview_recorded"] = True
+    assert renderer.render(recorded).shape == frame.shape
+    assert (renderer.render(recorded) != geometry_frame).any()
+
     # A NORMAL-only zero-distance car is not an actionable Driver hazard.
     normal = copy.deepcopy(road_context)
     normal["hazard"]["control_level"] = "NORMAL"
@@ -163,6 +181,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
+    print("Merged CARLA road mask and recorded preview status: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
