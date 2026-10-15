@@ -28,6 +28,7 @@ from .ui_theme import (
     draw_object_marker,
     draw_text,
     rounded_rect,
+    status_pill,
 )
 
 
@@ -232,21 +233,16 @@ class DriverModeRenderer:
 
         status_color = GREEN if not stale else CAUTION
 
-        self._put_text(
+        status_pill(
             canvas,
             status_text,
-            (1035, 34),
-            scale=0.62,
-            color=status_color,
-            thickness=2,
-        )
-
-        cv2.circle(
-            canvas,
-            (1015, 28),
-            6,
-            status_color,
-            -1,
+            (1000, 35),
+            foreground=status_color,
+            fill=SURFACE_2,
+            border=BORDER_SOFT,
+            scale=0.40,
+            height=26,
+            dot=True,
         )
 
         rounded_rect(
