@@ -197,7 +197,12 @@ class ProModeRenderer:
 
     @staticmethod
     def _object_sources(obj: Dict[str, Any]) -> List[str]:
-        return [str(x) for x in (obj.get("sources") or [])]
+        sources = (
+            obj.get("display_sources")
+            or obj.get("sources")
+            or []
+        )
+        return [str(x) for x in sources]
 
     def _object_visible_for_source(
         self,
@@ -337,7 +342,11 @@ class ProModeRenderer:
     ) -> Optional[Tuple[float, float]]:
         ego = snapshot.get("ego") or {}
         ego_pos = ego.get("world_position") or {}
-        obj_pos = obj.get("world_position") or {}
+        obj_pos = (
+            obj.get("display_world_position")
+            or obj.get("world_position")
+            or {}
+        )
 
         ex = self._number(ego_pos.get("x"))
         ey = self._number(ego_pos.get("y"))
