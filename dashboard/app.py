@@ -17,6 +17,7 @@ from .ui_theme import (
     SELECTED,
     SELECTED_TEXT,
     SURFACE_2,
+    SURFACE_3,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
     draw_text,
@@ -178,18 +179,31 @@ class PerceptinetDashboardApp:
     ) -> None:
         x1, y1, x2, y2 = rect
 
-        fill = SELECTED if active else SURFACE_2
-        text_color = SELECTED_TEXT if active else WHITE
+        # Premium segmented-control treatment. Avoid a large bright selected
+        # block: active state is indicated by a slightly raised graphite
+        # surface plus a thin neutral underline.
+        fill = SURFACE_3 if active else NAV
+        text_color = WHITE if active else MUTED
 
         rounded_rect(
             canvas,
             (x1, y1),
             (x2, y2),
             fill=fill,
-            border=NAV_BORDER,
+            border=SELECTED if active else NAV_BORDER,
             border_thickness=1,
             radius=9,
         )
+
+        if active:
+            cv2.line(
+                canvas,
+                (x1 + 18, y2 - 3),
+                (x2 - 18, y2 - 3),
+                SELECTED,
+                2,
+                cv2.LINE_AA,
+            )
 
         text_size, _ = cv2.getTextSize(
             label,
@@ -234,7 +248,7 @@ class PerceptinetDashboardApp:
         interpolation = (
             cv2.INTER_AREA
             if scale < 1.0
-            else cv2.INTER_LINEAR
+            else cv2.INTER_LANCZOS4
         )
 
         return cv2.resize(
