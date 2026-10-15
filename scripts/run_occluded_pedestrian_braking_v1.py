@@ -180,82 +180,304 @@ def relative_location(base_transform, forward=0.0, lateral=0.0, vertical=0.0):
     )
 
 
-def clear_stale_test_actors(client, world):
-    """
-    Remove dynamic actors left behind by an interrupted validation run.
+REMOVABLE_TEST_ACTOR_PREFIXES = (
+    "vehicle.",
+    "walker.pedestrian.",
+    "sensor.camera.",
+    "controller.ai.walker",
+)
 
-    The Perceptinet CARLA VM is a dedicated scenario environment. A hard
-    process termination can skip the script's finally block, leaving old
-    vehicles/walkers/cameras in the map. Those actors can make subsequent
-    try_spawn_actor() calls fail even though the scenario geometry is valid.
-    """
 
-    removable_prefixes = (
-        "vehicle.",
-        "walker.pedestrian.",
-        "sensor.camera.",
-        "controller.ai.walker",
-    )
-
-    stale_actors = [
+def get_live_test_actors(world):
+    return [
         actor
         for actor in world.get_actors()
         if actor.is_alive
-        and actor.type_id.startswith(removable_prefixes)
+        and actor.type_id.startswith(
+            REMOVABLE_TEST_ACTOR_PREFIXES
+        )
     ]
 
-    if not stale_actors:
-        print("Stale actor cleanup: none")
-        return 0
 
-    commands = [
-        carla.command.DestroyActor(actor.id)
-        for actor in stale_actors
-    ]
+def _wait_for_actor_ids_gone(
+    world,
+    actor_ids,
+    timeout_s=3.0,
+):
+    pending = {int(actor_id) for actor_id in actor_ids}
+    deadline = time.perf_counter() + float(timeout_s)
 
-    responses = client.apply_batch_sync(
-        commands,
-        True,
-    )
+    while pending and time.perf_counter() < deadline:
+        current_ids = {
+            actor.id
+            for actor in get_live_test_actors(world)
+        }
 
-    failures = [
-        response.error
-        for response in responses
-        if response.error
-    ]
+        pending.intersection_update(current_ids)
 
-    removed = len(stale_actors) - len(failures)
+        if not pending:
+            return True
 
-    print(
-        "Stale actor cleanup: "
-        f"removed={removed}, failed={len(failures)}"
-    )
+        try:
+            if world.get_settings().synchronous_mode:
+                world.tick()
+            else:
+                world.wait_for_tick(0.5)
+        except Exception:
+            time.sleep(0.10)
 
-    if failures:
-        raise RuntimeError(
-            "Failed to remove stale CARLA actors: "
-            + "; ".join(failures[:3])
+    return not pending
+
+
+def clear_stale_test_actors(
+    client,
+    world,
+    *,
+    max_attempts=3,
+):
+    """
+    Remove dynamic actors left behind by interrupted demo/validation runs.
+
+    CARLA actor destruction is asynchronous from the application's point of
+    view. A successful DestroyActor command does not guarantee that a new
+    actor can immediately reuse the same geometry on the very next Python
+    line. This helper therefore destroys, waits, verifies, and retries before
+    allowing scenario construction to continue.
+    """
+
+    total_removed = 0
+
+    for attempt in range(1, int(max_attempts) + 1):
+        stale_actors = get_live_test_actors(world)
+
+        if not stale_actors:
+            print(
+                "Stale actor cleanup verified | "
+                f"attempt={attempt} | remaining=0"
+            )
+            return total_removed
+
+        stale_ids = [actor.id for actor in stale_actors]
+
+        print(
+            "Stale actor cleanup | "
+            f"attempt={attempt}/{max_attempts} | "
+            f"found={len(stale_ids)}"
         )
 
-    return removed
+        responses = client.apply_batch_sync(
+            [
+                carla.command.DestroyActor(actor_id)
+                for actor_id in stale_ids
+            ],
+            False,
+        )
+
+        failures = [
+            response.error
+            for response in responses
+            if response.error
+        ]
+
+        removed_this_attempt = (
+            len(stale_ids) - len(failures)
+        )
+        total_removed += removed_this_attempt
+
+        if failures:
+            print(
+                "Stale actor cleanup command warnings | "
+                + "; ".join(failures[:3])
+            )
+
+        _wait_for_actor_ids_gone(
+            world,
+            stale_ids,
+            timeout_s=2.0,
+        )
+
+    remaining = get_live_test_actors(world)
+
+    if remaining:
+        detail = ", ".join(
+            f"{actor.id}:{actor.type_id}"
+            for actor in remaining[:8]
+        )
+
+        raise RuntimeError(
+            "CARLA cleanup verification failed; "
+            f"{len(remaining)} test actors remain: {detail}"
+        )
+
+    print(
+        "Stale actor cleanup verified | "
+        "remaining=0"
+    )
+
+    return total_removed
 
 
-def spawn_first_available(world, blueprints, transforms, label):
-    for blueprint in blueprints:
-        for transform in transforms:
-            actor = world.try_spawn_actor(blueprint, transform)
+def destroy_tracked_actors(
+    client,
+    world,
+    actors,
+):
+    """
+    Stop sensors first, batch-destroy the tracked scenario actors, and verify
+    that they are gone before returning control to the next run.
+    """
 
-            if actor is not None:
-                print(
-                    f"{label} spawned: {actor.id} "
-                    f"({blueprint.id}) at "
-                    f"x={transform.location.x:.1f}, "
-                    f"y={transform.location.y:.1f}, "
-                    f"z={transform.location.z:.1f}"
+    unique_actors = []
+    seen_ids = set()
+
+    for actor in reversed(actors):
+        if actor is None:
+            continue
+
+        try:
+            actor_id = int(actor.id)
+        except Exception:
+            continue
+
+        if actor_id in seen_ids:
+            continue
+
+        seen_ids.add(actor_id)
+        unique_actors.append(actor)
+
+    for actor in unique_actors:
+        try:
+            if (
+                actor.is_alive
+                and actor.type_id.startswith("sensor.")
+            ):
+                actor.stop()
+        except Exception:
+            pass
+
+    live_ids = []
+
+    for actor in unique_actors:
+        try:
+            if actor.is_alive:
+                live_ids.append(int(actor.id))
+        except Exception:
+            pass
+
+    if not live_ids:
+        print("Scenario cleanup verified | tracked_remaining=0")
+        return True
+
+    try:
+        responses = client.apply_batch_sync(
+            [
+                carla.command.DestroyActor(actor_id)
+                for actor_id in live_ids
+            ],
+            bool(world.get_settings().synchronous_mode),
+        )
+
+        failures = [
+            response.error
+            for response in responses
+            if response.error
+        ]
+
+        if failures:
+            print(
+                "Scenario cleanup command warnings | "
+                + "; ".join(failures[:3])
+            )
+    except Exception as exc:
+        print(
+            "Scenario cleanup batch warning | "
+            f"{exc}"
+        )
+
+    gone = _wait_for_actor_ids_gone(
+        world,
+        live_ids,
+        timeout_s=2.0,
+    )
+
+    if gone:
+        print(
+            "Scenario cleanup verified | "
+            "tracked_remaining=0"
+        )
+        return True
+
+    remaining_ids = {
+        actor.id
+        for actor in get_live_test_actors(world)
+    }.intersection(live_ids)
+
+    print(
+        "Scenario cleanup warning | "
+        f"tracked_remaining={sorted(remaining_ids)}"
+    )
+
+    return False
+
+
+def spawn_first_available(
+    world,
+    blueprints,
+    transforms,
+    label,
+    *,
+    retry_rounds=3,
+):
+    if not blueprints:
+        raise RuntimeError(
+            f"No blueprints supplied for {label}"
+        )
+
+    if not transforms:
+        raise RuntimeError(
+            f"No transforms supplied for {label}"
+        )
+
+    for round_index in range(1, int(retry_rounds) + 1):
+        for blueprint in blueprints:
+            for transform in transforms:
+                actor = world.try_spawn_actor(
+                    blueprint,
+                    transform,
                 )
-                return actor, transform
 
-    raise RuntimeError(f"Failed to spawn {label} after all fallback attempts")
+                if actor is not None:
+                    print(
+                        f"{label} spawned: {actor.id} "
+                        f"({blueprint.id}) at "
+                        f"x={transform.location.x:.1f}, "
+                        f"y={transform.location.y:.1f}, "
+                        f"z={transform.location.z:.1f} | "
+                        f"spawn_round={round_index}"
+                    )
+                    return actor, transform
+
+        print(
+            f"{label} spawn retry | "
+            f"round={round_index}/{retry_rounds} | "
+            f"blueprints={len(blueprints)} | "
+            f"transforms={len(transforms)}"
+        )
+
+        try:
+            if world.get_settings().synchronous_mode:
+                world.tick()
+            else:
+                world.wait_for_tick(0.5)
+        except Exception:
+            time.sleep(0.10)
+
+    raise RuntimeError(
+        f"Failed to spawn {label} after "
+        f"{retry_rounds} retry rounds "
+        f"({len(blueprints)} blueprints x "
+        f"{len(transforms)} transforms)"
+    )
 
 
 def normalize_name(name):
@@ -528,6 +750,13 @@ def main():
 
         world.set_weather(carla.WeatherParameters.ClearNoon)
 
+        # Ensure the mode transition and startup cleanup are visible to the
+        # synchronous simulation before any spawn collision checks occur.
+        for _ in range(2):
+            world.tick()
+
+        print("CARLA spawn state settled")
+
         blueprints = world.get_blueprint_library()
 
         ego_candidates = find_blueprints(
@@ -568,24 +797,16 @@ def main():
 
         spawn_points = world.get_map().get_spawn_points()
 
-        ego_vehicle = None
-        ego_transform = None
-
-        for transform in spawn_points:
-            actor = world.try_spawn_actor(ego_candidates[0], transform)
-
-            if actor is not None:
-                ego_vehicle = actor
-                ego_transform = transform
-                break
-
-        if ego_vehicle is None:
-            raise RuntimeError("Failed to spawn Ego Vehicle")
+        ego_vehicle, ego_transform = spawn_first_available(
+            world,
+            ego_candidates,
+            spawn_points,
+            "Ego Vehicle",
+            retry_rounds=3,
+        )
 
         actors.append(ego_vehicle)
         ego_vehicle.set_simulate_physics(False)
-
-        print(f"Ego Vehicle spawned: {ego_vehicle.id}")
 
         occluder_transforms = []
 
@@ -1868,12 +2089,17 @@ def main():
         except Exception:
             pass
 
-        for actor in reversed(actors):
-            try:
-                if actor is not None and actor.is_alive:
-                    actor.destroy()
-            except Exception:
-                pass
+        try:
+            destroy_tracked_actors(
+                client,
+                world,
+                actors,
+            )
+        except Exception as exc:
+            print(
+                "Scenario cleanup verification warning | "
+                f"{exc}"
+            )
 
         if traffic_manager is not None:
             try:
