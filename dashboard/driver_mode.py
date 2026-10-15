@@ -257,27 +257,20 @@ class DriverModeRenderer:
                 int(round(590 - forward * 10.2)))
 
     def _draw_fallback_road(self, canvas: np.ndarray) -> None:
-        """Only used when real CARLA map geometry is unavailable."""
-        rounded_rect(
-            canvas, (258, 146), (603, 668),
-            fill=(39, 40, 45), radius=18,
-        )
-        for side_x in (278, 582):
-            cv2.line(canvas, (side_x, 155), (side_x, 654),
-                     (91, 91, 97), 2, cv2.LINE_AA)
-        for y in range(192, 555, 55):
-            cv2.line(canvas, (430, y), (430, y+27),
-                     (99, 115, 125), 2, cv2.LINE_AA)
+        """Minimal parallel street boundaries when no CARLA map is available."""
+        for x in (385, 475):
+            cv2.line(
+                canvas, (x, 180), (x, 644),
+                (149, 156, 164), 2, cv2.LINE_AA,
+            )
 
     def _draw_context_roads(
         self, canvas: np.ndarray, road_context: Any
     ) -> bool:
-        """Render a single merged road surface from CARLA lane segments.
+        """Draw road outlines from a union of sampled CARLA lane footprints.
 
-        Painting each short waypoint segment with a thick outlined cv2.line
-        produces scalloped blobs at junctions. Rasterize flat-ended lane
-        polygons into one mask and outline the UNION instead. CARLA remains
-        the authoritative geometry source; this is presentation-only.
+        The binary geometry mask is an intermediate construction only.
+        Road pixels are not filled into the rendered glass dashboard.
         """
         if not isinstance(road_context, dict):
             return False
@@ -350,20 +343,29 @@ class DriverModeRenderer:
         mask = cv2.GaussianBlur(mask, (7, 7), 1.7)
         _, mask = cv2.threshold(mask, 112, 255, cv2.THRESH_BINARY)
 
-        # A single shoulder and surface for the union, not an outline
-        # around each of the hundreds of individual waypoint segments.
-        shoulder = cv2.dilate(
-            mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        )
-        layer[shoulder > 0] = (92, 84, 78)
-        layer[mask > 0] = (52, 50, 53)
+        # Extract only street edges from the merged lane footprint.
+        # No roadway fill, parcel, terrain or building decoration.
+        # A merged contour removes duplicate internal lane boundaries at
+        # junctions, leaving two continuous banks along each street.
         contours, _ = cv2.findContours(
             mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
-        cv2.drawContours(
-            layer, contours, -1, (105, 98, 94), 1, cv2.LINE_AA
-        )
-        return True
+        painted = 0
+        for contour in contours:
+            if cv2.contourArea(contour) < 90:
+                continue
+            # Reduce 3-m waypoint stepping without changing topology.
+            outline = cv2.approxPolyDP(contour, 2.0, True)
+            cv2.polylines(
+                layer, [outline], True, (82, 94, 109), 3,
+                cv2.LINE_AA,
+            )
+            cv2.polylines(
+                layer, [outline], True, (165, 172, 181), 1,
+                cv2.LINE_AA,
+            )
+            painted += 1
+        return painted > 0
 
     def _draw_detected_objects(
         self, canvas: np.ndarray, snapshot: Dict[str, Any],
