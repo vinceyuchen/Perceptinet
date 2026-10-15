@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from .presentation_state import derive_presentation_state
 from .ui_theme import (
     BACKGROUND,
     BORDER_SOFT,
@@ -266,11 +267,13 @@ class ProModeRenderer:
             color=MUTED,
         )
 
+        presentation = derive_presentation_state(
+            snapshot,
+            stale=stale,
+        )
+
         health = str(
-            (snapshot.get("system_health") or {}).get(
-                "status",
-                "UNKNOWN",
-            )
+            presentation["display_health"]
         )
 
         cv2.circle(
@@ -290,7 +293,9 @@ class ProModeRenderer:
             thickness=1 if health == "HEALTHY" else 2,
         )
 
-        live_text = "LIVE" if not stale else "DATA STALE"
+        live_text = str(
+            presentation["data_status"]
+        )
         self._put_text(
             canvas,
             live_text,
