@@ -147,6 +147,10 @@ def main():
 
     driver_frame = app.render(snapshot)
     assert driver_frame.shape == (900, 1600, 3)
+    # Driver Mode alone uses white/grey glass and monochrome typography.
+    assert driver_frame[20, 10, 0] >= 220
+    assert np.array_equal(driver_frame[:, :, 0], driver_frame[:, :, 1])
+    assert np.array_equal(driver_frame[:, :, 1], driver_frame[:, :, 2])
 
     dx1, dy1, dx2, dy2 = app.driver_button
     px1, py1, px2, py2 = app.pro_button
@@ -158,6 +162,9 @@ def main():
 
     pro_frame = app.render(snapshot)
     assert pro_frame.shape == (900, 1600, 3)
+    # Pro Mode must keep its original dark engineering theme.
+    assert pro_frame[20, 10, 0] <= 50
+    assert not np.array_equal(driver_frame, pro_frame)
 
     assert app.handle_click(
         (dx1 + dx2) // 2,
@@ -168,6 +175,7 @@ def main():
     assert app.toggle_mode() == app.DRIVER_MODE
 
     print("=== Perceptinet Unified Dashboard Test ===")
+    print("Light grayscale Driver / unchanged dark Pro navigation: OK")
     print("Sharp typography / rounded panels: OK")
     print("Driver Mode render: OK")
     print("Pro Mode render: OK")
