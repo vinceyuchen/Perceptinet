@@ -9,23 +9,38 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
-from .ui_theme import draw_text, rounded_rect
+from .ui_theme import (
+    BACKGROUND,
+    BORDER,
+    BORDER_SOFT,
+    CAUTION,
+    COOPERATIVE,
+    CRITICAL,
+    HEALTHY,
+    SURFACE_1,
+    SURFACE_2,
+    SURFACE_3,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    WARNING,
+    draw_text,
+    rounded_rect,
+)
 
 
 HAZARD_COLORS = {
-    "NORMAL": (210, 210, 210),
-    "CAUTION": (0, 190, 255),
-    "WARNING": (0, 150, 255),
-    "CRITICAL": (40, 40, 235),
+    "NORMAL": TEXT_PRIMARY,
+    "CAUTION": CAUTION,
+    "WARNING": WARNING,
+    "CRITICAL": CRITICAL,
 }
 
-BLUE = (235, 170, 60)
-GREEN = (90, 210, 120)
-WHITE = (240, 240, 240)
-MUTED = (155, 155, 155)
-PANEL = (24, 24, 24)
-PANEL_LIGHT = (34, 34, 34)
-BACKGROUND = (10, 10, 10)
+BLUE = COOPERATIVE
+GREEN = HEALTHY
+WHITE = TEXT_PRIMARY
+MUTED = TEXT_SECONDARY
+PANEL = SURFACE_1
+PANEL_LIGHT = SURFACE_2
 
 
 class DriverModeRenderer:
@@ -140,7 +155,7 @@ class DriverModeRenderer:
             p1,
             p2,
             fill=PANEL,
-            border=(52, 52, 52),
+            border=BORDER_SOFT,
             border_thickness=1,
             radius=10,
         )
@@ -221,7 +236,7 @@ class DriverModeRenderer:
             else "DATA STALE"
         )
 
-        status_color = GREEN if not stale else color
+        status_color = GREEN if not stale else CAUTION
 
         self._put_text(
             canvas,
@@ -240,10 +255,19 @@ class DriverModeRenderer:
             -1,
         )
 
+        rounded_rect(
+            canvas,
+            (875, 47),
+            (1245, 79),
+            fill=SURFACE_3,
+            border=color,
+            border_thickness=1,
+            radius=8,
+        )
         cv2.rectangle(
             canvas,
-            (875, 48),
-            (1245, 78),
+            (875, 53),
+            (880, 73),
             color,
             -1,
         )
@@ -251,9 +275,9 @@ class DriverModeRenderer:
         self._put_text(
             canvas,
             level,
-            (895, 71),
-            scale=0.65,
-            color=(10, 10, 10),
+            (897, 71),
+            scale=0.63,
+            color=color,
             thickness=2,
         )
 
