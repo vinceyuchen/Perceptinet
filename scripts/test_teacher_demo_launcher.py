@@ -68,7 +68,7 @@ def main() -> None:
                 "completed": True,
                 "reason": ("controller_confirmed_stop"
                            if scenario_modes[-1] == "clear"
-                           else "kinematic_proximity_limit"),
+                           else "kinematic_contact"),
                 "scenario": scenario_modes[-1],
                 "frame_id": 100 + scenario_count[0],
             }
