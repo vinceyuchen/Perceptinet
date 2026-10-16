@@ -1781,6 +1781,20 @@ def main():
                     )
 
                     ego_travelled_m += step_m
+                    # The moving walker can leave Ego's straight trajectory.
+                    # Cap teacher-demo travel beyond the original crossing
+                    # location rather than letting a no-brake case run away.
+                    # A capped run is an inconclusive proximity-limit case,
+                    # never counted as a verified safe stop or collision.
+                    if (teacher_demo
+                            and ego_travelled_m > initial_path_distance + 4.0):
+                        ego_command_speed_mps = 0.0
+                        motion_guard_triggered = True
+                        print(
+                            "TEACHER DEMO | KINEMATIC TRAVEL LIMIT REACHED | "
+                            f"travel={ego_travelled_m:.2f}m",
+                            flush=True,
+                        )
 
             world.tick()
 
