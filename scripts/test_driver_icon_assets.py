@@ -30,6 +30,7 @@ def main() -> None:
     for kind in (
         "EGO", "CAR", "TRUCK", "BUS", "MOTORCYCLE", "BICYCLE",
         "PEDESTRIAN", "PERSON", "MOTORBIKE",
+        "SAFE", "UNCONFIRMED", "ROAD CLEAR",
     ):
         normal, stale = render(kind), render(kind, stale=True)
         assert np.count_nonzero(normal[:, :, 0] > 25) > 60, kind
@@ -39,6 +40,27 @@ def main() -> None:
     assert resolve_icon("BICYCLE") == "MOTORCYCLE"
     assert resolve_icon("PERSON") == "PEDESTRIAN"
     assert resolve_icon("MOTORBIKE") == "MOTORCYCLE"
+    assert resolve_icon("ROAD CLEAR") == "SAFE"
+    assert resolve_icon("ROAD_CLEAR") == "SAFE"
+    assert np.array_equal(render("SAFE"), render("ROAD CLEAR"))
+    assert not np.array_equal(render("SAFE"), render("UNCONFIRMED"))
+
+    # Explicit semantic tint is reserved for the headline icon.
+    highlighted = np.full((96, 96, 3), 25, np.uint8)
+    assert draw_icon(
+        highlighted, (48, 48), "SAFE", size=22,
+        color=(135, 204, 121),
+    )
+    colored = highlighted.reshape(-1, 3)
+    assert np.any((colored[:, 0] != colored[:, 1])
+                  & (colored[:, 1] != colored[:, 2]))
+    stale_tint = np.full((96, 96, 3), 25, np.uint8)
+    assert draw_icon(
+        stale_tint, (48, 48), "SAFE", size=22,
+        stale=True, color=(135, 204, 121),
+    )
+    assert np.array_equal(stale_tint[:, :, 0], stale_tint[:, :, 1])
+    assert np.array_equal(stale_tint[:, :, 1], stale_tint[:, :, 2])
     assert np.array_equal(render("BUS"), render("TRUCK"))
     assert np.array_equal(render("BICYCLE"), render("MOTORCYCLE"))
     assert np.array_equal(render("PERSON"), render("PEDESTRIAN"))
@@ -64,7 +86,7 @@ def main() -> None:
     # Clip safely when a tracked target is at the map boundary.
     edge = np.full((60, 60, 3), 25, np.uint8)
     assert draw_icon(edge, (0, 0), "TRUCK", primary=True)
-    print("SVG-DERIVED DRIVER ICON ASSET TEST PASSED")
+    print("SVG SAFE/UNCONFIRMED ICON ASSET TEST PASSED")
 
 
 if __name__ == "__main__":
