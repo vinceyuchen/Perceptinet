@@ -24,7 +24,10 @@ if str(REPO_ROOT) not in sys.path:
 from perception.world_coordinates import enrich_detection_packet
 from v2i.channel import V2IChannel, V2IConfig
 from v2i.impaired_delivery import ImpairedV2IDelivery
-from simulation.teacher_scenarios import get_teacher_scenario, RAIN_V2I
+from simulation.teacher_scenarios import (
+    get_teacher_scenario, RAIN_V2I, CROSSING_TRIGGER_DISTANCE_M,
+    CROSSING_WALK_SPEED_MPS, CROSSING_FINISH_LATERAL_M,
+)
 from fusion.fusion_engine import FusionEngine
 from risk.risk_engine import RiskEngine, RiskConfig
 from control.braking_controller import BrakingController, BrakingConfig
@@ -1539,10 +1542,10 @@ def main():
             )
         )
 
-        if rain_demo:
-            # Collision events are independently reported by CARLA; the
-            # current Ego still uses kinematic motion, so report physical
-            # sensor evidence only if CARLA actually emits an event.
+        if teacher_demo:
+            # Install collision observation for BOTH scenarios.
+            # Ego remains kinematic; a sensor event does not mean full
+            # physically modelled impact dynamics.
             try:
                 collision_bp = blueprints.find("sensor.other.collision")
                 collision_sensor = world.spawn_actor(
@@ -1562,9 +1565,9 @@ def main():
                         })
                 collision_sensor.listen(on_collision)
                 collision_sensor_available = True
-                print("SCENARIO 2 | CARLA collision sensor active")
+                print(f"TEACHER DEMO | {teacher_scenario.key} collision sensor active")
             except Exception as exc:
-                print(f"SCENARIO 2 | Collision sensor unavailable: {exc}")
+                print(f"TEACHER DEMO | Collision sensor unavailable: {exc}")
 
         # ----------------------------------------------------
         # Settle CARLA actor state before the control loop.
@@ -1626,16 +1629,22 @@ def main():
         )
         pedestrian_actual_walk_distance_m = 0.0
         pedestrian_walk_motion_confirmed = False
-        if rain_demo:
-            # Actual walker locomotion and animation are produced by CARLA
-            # WalkerControl; Scenario 1 keeps its original stationary actor.
+        if teacher_demo:
+            # Both demo scenarios now use the SAME real CARLA WalkerControl
+            # crossing. Keep actor geometry/speed matched so weather and V2I
+            # impairment remain the principal experimental differences.
             pedestrian.set_simulate_physics(True)
             crossing = PedestrianCrossing(
-                trigger_distance_m=8.5,
-                walking_speed_mps=1.05,
-                finish_opposite_offset_m=2.4,
+                trigger_distance_m=CROSSING_TRIGGER_DISTANCE_M,
+                walking_speed_mps=CROSSING_WALK_SPEED_MPS,
+                finish_opposite_offset_m=CROSSING_FINISH_LATERAL_M,
             )
-            print("SCENARIO 2 | Moving pedestrian enabled (CARLA WalkerControl)")
+            print(
+                f"TEACHER DEMO | {teacher_scenario.key} | moving pedestrian "
+                f"trigger={CROSSING_TRIGGER_DISTANCE_M:.1f}m "
+                f"walk_speed={CROSSING_WALK_SPEED_MPS:.2f}m/s",
+                flush=True,
+            )
 
         last_processed_frame = None
 
@@ -1664,7 +1673,7 @@ def main():
             ego_now = ego_vehicle.get_transform()
             pedestrian_now = pedestrian.get_transform()
 
-            if rain_demo:
+            if teacher_demo:
                 crossing_step = crossing.step(
                     (ego_now.location.x, ego_now.location.y),
                     (pedestrian_now.location.x, pedestrian_now.location.y),
@@ -1679,7 +1688,8 @@ def main():
                 if crossing_step.walking and not crossing_started:
                     crossing_started = True
                     print(
-                        "SCENARIO 2 | PEDESTRIAN CROSSING STARTED | "
+                        f"TEACHER DEMO {teacher_scenario.key} | "
+                        "PEDESTRIAN CROSSING STARTED | "
                         f"ego_ahead={crossing_step.longitudinal_m:.2f}m | "
                         f"walker_speed={crossing_step.speed_mps:.2f}m/s",
                         flush=True,
@@ -1799,7 +1809,9 @@ def main():
                 pedestrian.get_transform().location
             )
             min_true_separation_m = min(min_true_separation_m, true_separation)
-            if rain_demo:
+            if teacher_demo:
+                if crossing_started and crossing_started_sim_s is None:
+                    crossing_started_sim_s = float(onboard_timestamp)
                 observed_ped = pedestrian.get_transform().location
                 current_xy = (observed_ped.x, observed_ped.y)
                 pedestrian_actual_walk_distance_m += math.hypot(
@@ -1811,11 +1823,12 @@ def main():
                         and not pedestrian_walk_motion_confirmed):
                     pedestrian_walk_motion_confirmed = True
                     print(
-                        "SCENARIO 2 | WALKING VERIFIED BY CARLA POSITION | "
+                        f"TEACHER DEMO {teacher_scenario.key} | "
+                        "WALKING VERIFIED BY CARLA POSITION | "
                         f"distance={pedestrian_actual_walk_distance_m:.2f}m",
                         flush=True,
                     )
-            if rain_demo and not kinematic_contact:
+            if teacher_demo and not kinematic_contact:
                 ego_pose = ego_vehicle.get_transform()
                 pedestrian_pose = pedestrian.get_transform()
                 fwd = ego_pose.get_forward_vector()
@@ -1835,7 +1848,8 @@ def main():
                 if kinematic_contact:
                     kinematic_contact_time_s = float(onboard_timestamp)
                     print(
-                        "SCENARIO 2 | KINEMATIC FOOTPRINT CONTACT | "
+                        f"TEACHER DEMO {teacher_scenario.key} | "
+                        "KINEMATIC FOOTPRINT CONTACT | "
                         "geometric overlap observed (not proof of physical "
                         "impact); stopping playback for inspection",
                         flush=True,
@@ -2177,8 +2191,8 @@ def main():
             ego_command_speed_mps = braking_command[
                 "target_speed_mps"
             ]
-            if rain_demo and kinematic_contact:
-                # Playback termination after real envelope intersection.
+            if teacher_demo and kinematic_contact:
+                # Playback termination after measured envelope intersection.
                 # This is NOT an emergency command from the risk model.
                 ego_command_speed_mps = 0.0
 
