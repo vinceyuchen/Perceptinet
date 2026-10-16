@@ -276,6 +276,59 @@ class DriverModeRenderer:
             return ALERT_YELLOW
         return SAFE_GREEN  # DRIVING / STOPPED are non-escalating states.
 
+    def _unified_status_color(self, snapshot: Dict[str, Any],
+                              *, stale: bool) -> Tuple[int, int, int]:
+        """Single authoritative accent for both Driver status cards.
+
+        Hazard urgency takes priority over a vehicle's current motion:
+        DRIVING does not mean SAFE when a CAUTION pedestrian is detected.
+        Stale measurements cannot claim a current level of safety.
+        """
+        if stale:
+            return MUTED
+        level = str((snapshot.get("hazard") or {}).get(
+            "control_level", "NORMAL"
+        )).upper()
+        braking = snapshot.get("braking") or {}
+        action = self._vehicle_action(snapshot).upper()
+        if level == "CRITICAL" or braking.get("emergency") or action == "EMERGENCY BRAKING":
+            return SEVERE_RED
+        if level == "WARNING":
+            return DANGER_RED
+        if level == "CAUTION" or action in {"SLOWING", "BRAKING"}:
+            return ALERT_YELLOW
+        return SAFE_GREEN
+
+    def _target_heading(self, canvas: np.ndarray, label: str,
+                        *, accent: Tuple[int, int, int], stale: bool) -> None:
+        """Center a large SVG icon + target name as one visual unit."""
+        label = str(label).upper()
+        font_scale, thickness = 1.24, 2
+        icon_side, gap = 46, 13
+        available = 355 - icon_side - gap
+        (text_width, _), _ = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_DUPLEX, font_scale, thickness
+        )
+        if text_width > available:
+            font_scale *= available / max(text_width, 1)
+            (text_width, _), _ = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_DUPLEX, font_scale, thickness
+            )
+        left = int(1052 - (icon_side + gap + text_width) / 2)
+        icon_center = (left + icon_side // 2, 112)
+        if not draw_icon(
+            canvas, icon_center, label, size=icon_side // 2,
+            stale=stale, color=accent,
+        ):
+            # Unknown object class: do not substitute another class's icon.
+            cv2.circle(canvas, icon_center, 17, accent, 2, cv2.LINE_AA)
+            self._put_text(canvas, "?", (icon_center[0]-7, 120),
+                           scale=0.64, color=accent, thickness=2)
+        self._put_text(
+            canvas, label, (left + icon_side + gap, 125),
+            scale=font_scale, color=accent, thickness=thickness
+        )
+
     def _centered_text(self, canvas: np.ndarray, text: str,
                        center_x: int, baseline_y: int,
                        *, max_width: int, scale: float,
@@ -498,67 +551,25 @@ class DriverModeRenderer:
 
     def _draw_hazard(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                      stale: bool) -> None:
-        """One dominant target + matching SVG icon, then distance and TTC."""
-        hazard = snapshot.get("hazard") or {}
-        level = str(hazard.get("control_level", "NORMAL")).upper()
+        """Dominant icon + name (SAFE/UNCONFIRMED/class), distance, TTC."""
+        level = str((snapshot.get("hazard") or {}).get(
+            "control_level", "NORMAL"
+        )).upper()
         primary = self._active_primary(snapshot)
-        color = MUTED if stale else self._hazard_color(level)
-        center_x = 1052
+        accent = self._unified_status_color(snapshot, stale=stale)
 
-        if primary is not None:
-            klass = str(primary.get("class_name") or "OBJECT").upper()
-            klass = {"PERSON": "PEDESTRIAN",
-                     "MOTORBIKE": "MOTORCYCLE"}.get(klass, klass)
-            # Keep the entire icon + label pair geometrically centered.
-            font_scale, thickness = 1.04, 2
-            (tw, _), _ = cv2.getTextSize(
-                klass, cv2.FONT_HERSHEY_DUPLEX, font_scale, thickness
-            )
-            available_text_width = 318
-            if tw > available_text_width:
-                font_scale *= available_text_width / tw
-                (tw, _), _ = cv2.getTextSize(
-                    klass, cv2.FONT_HERSHEY_DUPLEX, font_scale, thickness
-                )
-            icon_side, gap = 43, 14
-            left = int(center_x - (icon_side + gap + tw) / 2)
-            icon_position = (left + icon_side // 2, 96)
-            if not draw_icon(
-                canvas, icon_position, klass, size=22,
-                primary=False, stale=stale
-            ):
-                # No category-specific artwork means no misleading
-                # substitution with a different road-user class.
-                cv2.circle(canvas, icon_position, 16, color, 2, cv2.LINE_AA)
-                self._put_text(canvas, "?", (icon_position[0] - 8, 103),
-                               scale=0.6, color=color, thickness=2)
-            self._put_text(
-                canvas, klass, (left + icon_side + gap, 109),
-                scale=font_scale, color=color, thickness=thickness
-            )
-        elif level == "NORMAL":
-            self._centered_text(
-                canvas, "ROAD CLEAR", center_x, 108,
-                max_width=362, scale=1.16, color=color
-            )
+        if level == "NORMAL":
+            label = "SAFE"
+        elif primary is None:
+            label = "UNCONFIRMED"
         else:
-            # A warning without a validated primary is not a confirmed
-            # pedestrian/car; display uncertainty rather than invent one.
-            self._centered_text(
-                canvas, "TARGET", center_x, 89,
-                max_width=350, scale=1.23, color=color
-            )
-            self._centered_text(
-                canvas, "UNCONFIRMED", center_x, 121,
-                max_width=350, scale=0.83, color=color
-            )
+            label = str(primary.get("class_name") or "UNCONFIRMED").upper()
+            label = {
+                "PERSON": "PEDESTRIAN", "MOTORBIKE": "MOTORCYCLE"
+            }.get(label, label)
+        self._target_heading(canvas, label, accent=accent, stale=stale)
 
-        status = "DATA STALE" if stale else level
-        self._centered_text(
-            canvas, status, center_x, 147, max_width=315,
-            scale=0.46, color=MUTED if stale else color, thickness=1
-        )
-
+        # Distance and TTC stay legible and aligned for every heading.
         self._put_text(canvas, "DISTANCE", (875, 177),
                        scale=0.38, color=MUTED, thickness=1)
         self._put_text(canvas, "TTC", (1070, 177),
@@ -573,14 +584,15 @@ class DriverModeRenderer:
         self._fit_text(
             canvas, "--" if ttc is None else f"{ttc:.1f} s",
             (1070, 215), 164, 0.83,
-            MUTED if stale else color, 2
+            MUTED if stale else accent, 2
         )
 
     def _draw_vehicle(self, canvas: np.ndarray, snapshot: Dict[str, Any],
                       stale: bool, presentation: Dict[str, Any]) -> None:
         """Large, centered action first. Speeds remain secondary evidence."""
         action = str(presentation["vehicle_action"]).upper()
-        color = self._vehicle_state_color(action, stale=stale)
+        # Share precisely the same risk-colored accent as the target card.
+        color = self._unified_status_color(snapshot, stale=stale)
         self._centered_text(
             canvas, action, 1052, 352, max_width=363,
             scale=1.22 if action != "EMERGENCY BRAKING" else 0.95,
