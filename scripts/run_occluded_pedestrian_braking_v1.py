@@ -1739,15 +1739,16 @@ def main():
                     + (next_ego_location.y - ego_now.location.y)
                     * ego_path_forward.y
                 )
-                invalid_motion = (
-                    (not math.isfinite(step_forward_progress_m))
-                    or (
-                        step_forward_progress_m <= 0
-                        if teacher_demo else
-                        next_distance_to_pedestrian >
-                        ego_to_pedestrian_m + 0.001
+                if teacher_demo:
+                    invalid_motion = (
+                        not math.isfinite(step_forward_progress_m)
+                        or step_forward_progress_m <= 0.0
                     )
-                )
+                else:
+                    invalid_motion = (
+                        next_distance_to_pedestrian
+                        > ego_to_pedestrian_m + 0.001
+                    )
                 if invalid_motion:
                     ego_command_speed_mps = 0.0
                     ego_speed_this_tick_mps = 0.0
