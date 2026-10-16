@@ -1802,6 +1802,7 @@ def main():
             # ------------------------------------------------
 
             fusion_packets = [onboard_packet]
+            delivered_rsu = None
 
             if validation_config.cooperative_enabled:
                 if rain_demo:
@@ -2269,8 +2270,8 @@ def main():
                             rsu_packet["inference_ms"],
                         "v2i_latency_ms":
                             (
-                                (rsu_packet.get("v2i") or {})
-                                .get("latency_ms")
+                                ((delivered_rsu if rain_demo else rsu_packet)
+                                 or {}).get("v2i", {}).get("latency_ms")
                             ),
                         "fusion_latency_ms":
                             fusion_latency_ms,
@@ -2398,6 +2399,20 @@ def main():
                     rsu_view,
                     world_position_text(rsu_ped),
                 )
+                if rain_demo:
+                    if (degraded_v2i.outage_started_s is not None
+                            and float(onboard_timestamp)
+                            - degraded_v2i.outage_started_s
+                            < teacher_scenario.blackout_s):
+                        channel_overlay = "INJECTED V2I BLACKOUT"
+                    elif delivered_rsu is None:
+                        channel_overlay = "RSU DATA DELAYED / DROPPED"
+                    else:
+                        channel_overlay = (
+                            "V2I ARRIVED: "
+                            f"{delivered_rsu['v2i']['latency_ms']:.0f}ms"
+                        )
+                    add_status(rsu_view, channel_overlay, y=113)
 
                 combined = np.hstack(
                     (onboard_view, rsu_view)
