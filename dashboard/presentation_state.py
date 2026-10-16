@@ -94,8 +94,18 @@ def derive_presentation_state(
             else "ONBOARD"
         )
 
+    # Fault injection status is separate from the freshness of the local
+    # JSON feed. A fresh dashboard can still have degraded V2I communication.
+    experiment = snapshot.get("experiment") or {}
+    if experiment.get("scenario") == "rain_v2i" and not stale:
+        data_status = "V2I DEGRADED"
+        display_health = "DATA LIMITED"
+        perception_text = "COOPERATIVE LIMITED"
+
     if stale:
         footer_message = "COOPERATIVE DATA STALE"
+    elif experiment.get("scenario") == "rain_v2i":
+        footer_message = "HEAVY RAIN - SIMULATED V2I DEGRADATION"
     elif stopped and primary:
         class_name = str(
             primary.get("class_name") or "hazard"
