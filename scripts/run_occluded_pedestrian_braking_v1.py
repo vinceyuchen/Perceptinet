@@ -2455,15 +2455,24 @@ def main():
             if rsu_ped is not None and rsu_ped.get("world_match") is not None:
                 match = rsu_ped["world_match"]
                 pos = match["world_position"]
-
+                if rain_demo:
+                    v2i_state = (
+                        f"DELIVERED {delivered_rsu['v2i']['latency_ms']:.0f}ms"
+                        if delivered_rsu is not None
+                        else "NOT DELIVERED (blackout/loss/delay)"
+                    )
+                else:
+                    latency = (rsu_packet.get("v2i") or {}).get("latency_ms")
+                    v2i_state = (
+                        f"{latency:.2f}ms" if latency is not None else "OFF"
+                    )
                 print(
                     f'frame={rsu_frame_id} | '
                     f'RSU pedestrian conf={rsu_ped["confidence"]:.2f} | '
                     f'actor={match["actor_id"]} | '
                     f'world=({pos["x"]:.2f}, {pos["y"]:.2f}, {pos["z"]:.2f}) | '
                     f'depth={match["camera_depth_m"]:.2f}m | '
-                    f'v2i='
-                    f'{("OFF" if not (rsu_packet.get("v2i") or {}).get("latency_ms") else format((rsu_packet.get("v2i") or {}).get("latency_ms"), ".2f") + "ms")}'
+                    f'v2i={v2i_state}'
                 )
 
             elif rsu_ped is not None:
