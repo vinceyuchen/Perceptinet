@@ -13,6 +13,12 @@ from dataclasses import dataclass
 CLEAR = "clear"
 RAIN_V2I = "rain_v2i"
 
+# Identical crossing geometry and WalkerControl motion in BOTH scenarios.
+# Tune these jointly; only weather/V2I are independent variables.
+CROSSING_TRIGGER_DISTANCE_M = 11.5
+CROSSING_WALK_SPEED_MPS = 0.95
+CROSSING_FINISH_LATERAL_M = 2.4
+
 
 @dataclass(frozen=True)
 class TeacherScenario:
