@@ -70,6 +70,9 @@ def main() -> None:
                            if scenario_modes[-1] == "clear"
                            else "kinematic_contact"),
                 "scenario": scenario_modes[-1],
+                "safe_stop_verified": scenario_modes[-1] == "clear",
+                "pedestrian_motion_verified": True,
+                "pedestrian_walked_m": 2.8,
                 "frame_id": 100 + scenario_count[0],
             }
             markers.append(info)
