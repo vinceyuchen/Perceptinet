@@ -389,6 +389,8 @@ def main(argv=None) -> int:
                 {"controller_confirmed_stop"}
                 if scenario_key == "clear"
                 else {"controller_confirmed_stop",
+                      "kinematic_contact",
+                      "collision_sensor_event",
                       "kinematic_proximity_limit",
                       "observation_window_complete"}
             )
