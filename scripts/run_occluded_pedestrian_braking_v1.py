@@ -23,6 +23,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from perception.world_coordinates import enrich_detection_packet
 from v2i.channel import V2IChannel, V2IConfig
+from v2i.impaired_delivery import ImpairedV2IDelivery
+from simulation.teacher_scenarios import get_teacher_scenario, RAIN_V2I
 from fusion.fusion_engine import FusionEngine
 from risk.risk_engine import RiskEngine, RiskConfig
 from control.braking_controller import BrakingController, BrakingConfig
@@ -711,6 +713,7 @@ def main():
     clear_stale_test_actors(client, world)
 
     original_settings = world.get_settings()
+    original_weather = world.get_weather()
     actors = []
     traffic_manager = None
 
@@ -728,6 +731,17 @@ def main():
         os.environ.get("PERCEPTINET_TEACHER_DEMO") == "1"
         and not validation_config.enabled
     )
+    teacher_scenario = (
+        get_teacher_scenario(
+            os.environ.get("PERCEPTINET_DEMO_SCENARIO", "clear")
+        )
+        if teacher_demo else None
+    )
+    rain_demo = bool(
+        teacher_scenario and teacher_scenario.key == RAIN_V2I
+    )
+    if teacher_scenario:
+        print("TEACHER DEMO |", teacher_scenario.label)
     if validation_config.enabled:
         results_dir = validation_config.run_dir
         dashboard_snapshot_path = results_dir / "dashboard_snapshot.json"
@@ -804,8 +818,29 @@ def main():
             random_seed=3163,
         )
     )
-
-    print("V2I channel: 25 ms base latency +/- 5 ms jitter")
+    degraded_v2i = (
+        ImpairedV2IDelivery(
+            V2IConfig(
+                base_latency_ms=teacher_scenario.base_latency_ms,
+                jitter_ms=teacher_scenario.jitter_ms,
+                packet_loss_rate=teacher_scenario.packet_loss_rate,
+                random_seed=3163,
+            ),
+            max_age_s=2.0,
+            outage_after_detection_s=teacher_scenario.blackout_s,
+        )
+        if rain_demo else None
+    )
+    if rain_demo:
+        print(
+            "V2I FAULT INJECTION | sim-time delivery queue | "
+            f"latency={teacher_scenario.base_latency_ms:.0f}ms +/- "
+            f"{teacher_scenario.jitter_ms:.0f}ms | "
+            f"loss={teacher_scenario.packet_loss_rate:.0%} | "
+            f"first-pedestrian blackout={teacher_scenario.blackout_s:.1f}s"
+        )
+    else:
+        print("V2I channel: 25 ms base latency +/- 5 ms jitter")
 
     fusion_engine = FusionEngine(
         fusion_distance_m=2.0,
@@ -876,6 +911,15 @@ def main():
     brake_estimated_stop_distance_m = None
     stop_reported = False
     motion_guard_triggered = False
+    # Explicit kinematic safety/proximity observations, not fabricated
+    # physical collision measurements (actor physics is disabled here).
+    min_true_separation_m = math.inf
+    first_rsu_pedestrian_time_s = None
+    first_fused_pedestrian_time_s = None
+    first_brake_time_s = None
+    first_sim_time_s = None
+    scenario_end_reason = None
+    scenario_hold_since = None
 
     print(
         f"Automatic braking Ego cruise speed: "
@@ -931,7 +975,19 @@ def main():
         traffic_manager = client.get_trafficmanager(TM_PORT)
         traffic_manager.set_synchronous_mode(True)
 
-        world.set_weather(carla.WeatherParameters.ClearNoon)
+        if rain_demo:
+            world.set_weather(carla.WeatherParameters(
+                cloudiness=teacher_scenario.cloudiness,
+                precipitation=teacher_scenario.precipitation,
+                precipitation_deposits=teacher_scenario.deposits,
+                wetness=teacher_scenario.wetness,
+                wind_intensity=teacher_scenario.wind_intensity,
+                fog_density=teacher_scenario.fog_density,
+                sun_altitude_angle=teacher_scenario.sun_altitude,
+            ))
+            print("CARLA WEATHER | HEAVY RAIN | visual weather only")
+        else:
+            world.set_weather(carla.WeatherParameters.ClearNoon)
 
         # Ensure the mode transition and startup cleanup are visible to the
         # synchronous simulation before any spawn collision checks occur.
@@ -1662,6 +1718,12 @@ def main():
                 continue
 
             last_processed_frame = onboard_frame_id
+            if first_sim_time_s is None:
+                first_sim_time_s = float(onboard_timestamp)
+            true_separation = ego_vehicle.get_transform().location.distance(
+                pedestrian.get_transform().location
+            )
+            min_true_separation_m = min(min_true_separation_m, true_separation)
 
             pipeline_start = time.perf_counter()
 
@@ -1715,6 +1777,10 @@ def main():
                 CAMERA_FOV,
             )
 
+            if (first_rsu_pedestrian_time_s is None
+                    and get_pedestrian_detection(rsu_packet) is not None):
+                first_rsu_pedestrian_time_s = float(rsu_timestamp)
+
             # Feed real per-camera detections/inference timing
             # into Metrics v1 before the remote packet crosses V2I.
             metrics_collector.record_perception_packet(
@@ -1738,21 +1804,31 @@ def main():
             fusion_packets = [onboard_packet]
 
             if validation_config.cooperative_enabled:
-                received_rsu_packet = v2i_channel.transmit(
-                    rsu_packet,
-                    source_id="RSU-01",
-                )
-
-                if received_rsu_packet is None:
-                    continue
-
-                rsu_packet = received_rsu_packet
-
-                metrics_collector.record_perception_packet(
-                    rsu_packet
-                )
-
-                fusion_packets.append(rsu_packet)
+                if rain_demo:
+                    # The original V2I model records simulated delay but
+                    # returns the packet immediately. This scenario queues
+                    # messages until the actual CARLA sim-time receive
+                    # deadline; dropped packets must NOT skip Onboard risk.
+                    degraded_v2i.offer(
+                        rsu_packet, sim_time_s=onboard_timestamp
+                    )
+                    delivered_rsu = degraded_v2i.receive_ready(
+                        sim_time_s=onboard_timestamp
+                    )
+                    if delivered_rsu is not None:
+                        fusion_packets.append(delivered_rsu)
+                        metrics_collector.record_perception_packet(
+                            delivered_rsu
+                        )
+                else:
+                    received_rsu_packet = v2i_channel.transmit(
+                        rsu_packet, source_id="RSU-01"
+                    )
+                    if received_rsu_packet is None:
+                        continue
+                    rsu_packet = received_rsu_packet
+                    metrics_collector.record_perception_packet(rsu_packet)
+                    fusion_packets.append(rsu_packet)
 
             fusion_start = time.perf_counter()
 
@@ -1772,6 +1848,9 @@ def main():
                 ),
                 None,
             )
+            if (fused_pedestrian is not None
+                    and first_fused_pedestrian_time_s is None):
+                first_fused_pedestrian_time_s = float(onboard_timestamp)
 
             # ------------------------------------------------
             # Risk Assessment v1
@@ -2004,6 +2083,7 @@ def main():
                 and not brake_started
             ):
                 brake_started = True
+                first_brake_time_s = float(onboard_timestamp)
 
                 brake_start_speed_mps = (
                     braking_command["speed_before_mps"]
@@ -2204,6 +2284,22 @@ def main():
                 )
             )
 
+            if teacher_scenario is not None:
+                dashboard_snapshot["experiment"] = {
+                    "scenario": teacher_scenario.key,
+                    "label": teacher_scenario.label,
+                    "weather": "HEAVY RAIN" if rain_demo else "CLEAR",
+                    "fault_injected": rain_demo,
+                    "v2i": degraded_v2i.stats() if rain_demo else {
+                        "fault_injected": False,
+                        "base_latency_ms": 25.0,
+                        "packet_loss_rate": 0.0,
+                    },
+                }
+                if rain_demo:
+                    dashboard_snapshot["system_health"]["status"] = (
+                        "DATA LIMITED"
+                    )
             try:
                 dashboard_data_layer.write_snapshot_json(
                     dashboard_snapshot,
