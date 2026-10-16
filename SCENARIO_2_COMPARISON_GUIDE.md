@@ -50,7 +50,9 @@ Each cycle produces an isolated `results/teacher_demo/runs/cycle_*/scenario_resu
 - Minimum Ego-to-pedestrian **centre-point** separation and V2I drops/deliveries.
 - A collision-sensor availability flag and any observed CARLA collision events.
 - An independent `kinematic_contact_observed` flag for 2D footprint overlap.
-- A pedestrian-crossing-started flag and `kinematic_contact` completion if applicable.
+- `pedestrian_crossing_started`, `pedestrian_motion_verified`, and
+  `pedestrian_walked_m` from actual CARLA pedestrian world-position updates.
+- `kinematic_contact` completion when the 2D model envelopes overlap.
 - `physical_collision_observed` is `null` when no sensor is available; with a
   sensor, it reflects actual reported walker collision **events**, not
   fabricated visual overlap.
