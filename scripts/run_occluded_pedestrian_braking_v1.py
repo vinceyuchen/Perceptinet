@@ -658,7 +658,32 @@ def main():
     client = carla.Client(HOST, PORT)
     client.set_timeout(20.0)
 
-    world = client.get_world()
+    # CARLA Unreal can temporarily pause while loading or recovering
+    # actors after a previous cycle. Retry only for the teacher-demo
+    # launcher; preserve standalone and validation behavior.
+    if os.environ.get("PERCEPTINET_TEACHER_DEMO") == "1":
+        for attempt in range(3):
+            try:
+                world = client.get_world()
+                break
+            except RuntimeError as exc:
+                message = str(exc).lower()
+                if "time-out" not in message and "timeout" not in message:
+                    raise
+                if attempt == 2:
+                    raise RuntimeError(
+                        "CARLA get_world RPC remained unresponsive after "
+                        "three attempts. Verify Unreal CARLA is not frozen "
+                        "and manually restart the simulator if necessary."
+                    ) from exc
+                print(
+                    "TEACHER DEMO | CARLA world RPC temporarily stalled "
+                    f"(attempt {attempt + 1}/3). Retrying...",
+                    flush=True,
+                )
+                time.sleep(3.0)
+    else:
+        world = client.get_world()
 
     print("Connected to CARLA")
     print("Map:", world.get_map().name)
