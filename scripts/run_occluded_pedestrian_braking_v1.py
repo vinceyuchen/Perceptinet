@@ -2380,8 +2380,12 @@ def main():
                     interpolation=cv2.INTER_AREA,
                 )
 
-                add_header(onboard_view, "ONBOARD PERCEPTION")
-                add_header(rsu_view, "RSU-01 PERCEPTION")
+                if rain_demo:
+                    add_header(onboard_view, "ONBOARD / HEAVY RAIN")
+                    add_header(rsu_view, "RSU-01 / V2I FAULT TEST")
+                else:
+                    add_header(onboard_view, "ONBOARD PERCEPTION")
+                    add_header(rsu_view, "RSU-01 PERCEPTION")
 
                 add_status(
                     onboard_view,
@@ -2466,29 +2470,69 @@ def main():
                 if demo_stop_file.is_file():
                     print("TEACHER DEMO | Operator requested clean shutdown")
                     break
+
+                # Baseline retains the original confirmed-stop completion.
+                # A degraded-link run may instead reach the kinematic
+                # scenario guard with NO braking trigger. The actor physics
+                # is disabled, so this is a measured proximity-limit event,
+                # NOT a physical CARLA collision.
                 if stop_reported:
-                    # Publish multiple STOPPED frames before the next cycle.
-                    # The marker is a success signal, never a fake telemetry
-                    # or an instruction to the braking controller.
+                    scenario_end_reason = "controller_confirmed_stop"
+                elif rain_demo and motion_guard_triggered:
+                    scenario_end_reason = "kinematic_proximity_limit"
+                elif (rain_demo and first_sim_time_s is not None
+                      and float(onboard_timestamp) - first_sim_time_s >= 16.0):
+                    scenario_end_reason = "observation_window_complete"
+
+                if scenario_end_reason is not None:
                     if demo_stop_since is None:
                         demo_stop_since = time.monotonic()
                     if time.monotonic() - demo_stop_since >= demo_hold_s:
+                        result = {
+                            "completed": True,
+                            "reason": scenario_end_reason,
+                            "scenario": teacher_scenario.key,
+                            "frame_id": onboard_frame_id,
+                            "sim_time_s": onboard_timestamp,
+                            "first_rsu_detection_s": first_rsu_pedestrian_time_s,
+                            "first_fused_detection_s": first_fused_pedestrian_time_s,
+                            "first_brake_s": first_brake_time_s,
+                            "brake_triggered": bool(brake_started),
+                            "controller_confirmed_stop": bool(stop_reported),
+                            "minimum_center_distance_m": (
+                                None if not math.isfinite(min_true_separation_m)
+                                else round(min_true_separation_m, 3)
+                            ),
+                            "kinematic_motion_guard": bool(motion_guard_triggered),
+                            "physical_collision_observed": None,
+                            "collision_sensor_available": False,
+                            "v2i": degraded_v2i.stats() if rain_demo else {
+                                "fault_injected": False,
+                                "total_sent": v2i_channel.total_sent,
+                                "total_received": v2i_channel.total_received,
+                                "total_dropped": v2i_channel.total_dropped,
+                            },
+                        }
+                        # One report per cycle; data is measured, not an
+                        # invented success/failure or collision result.
+                        (results_dir / "scenario_result.json").write_text(
+                            json.dumps(result, indent=2), encoding="utf-8"
+                        )
                         demo_cycle_file.parent.mkdir(
                             parents=True, exist_ok=True
                         )
                         temporary = demo_cycle_file.with_suffix(".tmp")
                         temporary.write_text(
-                            json.dumps({
-                                "completed": True,
-                                "reason": "controller_confirmed_stop",
-                                "frame_id": onboard_frame_id,
-                                "sim_time_s": onboard_timestamp,
-                            }),
-                            encoding="utf-8",
+                            json.dumps(result, indent=2), encoding="utf-8"
                         )
                         temporary.replace(demo_cycle_file)
-                        print("TEACHER DEMO | STOP HOLD COMPLETE | "
-                              "restarting next scenario via launcher")
+                        print(
+                            "TEACHER DEMO | CYCLE COMPLETE | "
+                            f"scenario={teacher_scenario.key} | "
+                            f"reason={scenario_end_reason} | "
+                            f"minimum_center_distance={result['minimum_center_distance_m']}m",
+                            flush=True,
+                        )
                         break
 
             if validation_config.enabled:
@@ -2577,6 +2621,11 @@ def main():
             world.apply_settings(original_settings)
         except Exception:
             pass
+
+        try:
+            world.set_weather(original_weather)
+        except Exception as exc:
+            print(f"CARLA weather restoration warning: {exc}")
 
         cv2.destroyAllWindows()
 
