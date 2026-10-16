@@ -30,6 +30,8 @@ import sys
 import tempfile
 import time
 
+from simulation.teacher_scenarios import scenario_for_cycle
+
 ROOT = Path(__file__).resolve().parent
 SCENARIO = ROOT / "scripts" / "run_occluded_pedestrian_braking_v1.py"
 DASHBOARD = ROOT / "scripts" / "run_dashboard.py"
@@ -247,6 +249,11 @@ def parse_args(argv=None):
                         help="Stop with an error if a run never stops.")
     parser.add_argument("--cycles", type=int, default=0,
                         help="0 = loop until Q, positive = number of cycles.")
+    parser.add_argument(
+        "--scenario", choices=("clear", "rain_v2i", "alternate"),
+        default="clear",
+        help="clear keeps the original demo; alternate cycles clear/rain.",
+    )
     parser.add_argument("--dashboard-width", type=int, default=1152)
     parser.add_argument("--dashboard-height", type=int, default=648)
     parser.add_argument("--dry-run", action="store_true",
@@ -270,7 +277,9 @@ def main(argv=None) -> int:
         print("Dashboard:", DASHBOARD)
         print("Snapshot:", SNAPSHOT)
         print("Launcher verifies CARLA world/map RPC before scene startup.")
-        print("Scenario exits for restart ONLY on a confirmed physical stop.")
+        print("Selected scenario:", args.scenario)
+        print("Clear scene requires confirmed stop; rainy scene also permits "
+              "measured proximity-limit completion (not a collision).")
         print("Requirements: CARLA server 127.0.0.1:2000, Python carla/cv2/YOLO.")
         return 0
 
@@ -325,6 +334,8 @@ def main(argv=None) -> int:
             env.pop("PERCEPTINET_VALIDATION_HEADLESS", None)
             env.pop("PERCEPTINET_VALIDATION_AUTO_EXIT", None)
             env["PERCEPTINET_TEACHER_DEMO"] = "1"
+            scenario_key = scenario_for_cycle(args.scenario, rounds + 1)
+            env["PERCEPTINET_DEMO_SCENARIO"] = scenario_key
             # Unique per-cycle CSV and metrics, with a private live
             # snapshot shared by this launcher's Dashboard and scenario.
             env["PERCEPTINET_DEMO_CYCLE_INDEX"] = str(rounds + 1)
@@ -333,7 +344,10 @@ def main(argv=None) -> int:
             env["PERCEPTINET_DEMO_CYCLE_FILE"] = str(CYCLE_FILE)
             env["PERCEPTINET_DEMO_STOP_HOLD_SECONDS"] = str(args.hold_seconds)
 
-            print(f"\n=== REAL SCENARIO CYCLE {rounds + 1} ===", flush=True)
+            print(
+                f"\n=== REAL SCENARIO CYCLE {rounds + 1} "
+                f"| {scenario_key.upper()} ===", flush=True
+            )
             scenario = subprocess.Popen(
                 [sys.executable, str(SCENARIO)],
                 cwd=str(ROOT), env=env
@@ -371,12 +385,27 @@ def main(argv=None) -> int:
                       "marker (for example, camera window Q). Stopping.")
                 break
             report = json.loads(CYCLE_FILE.read_text(encoding="utf-8"))
-            if (report.get("completed") is not True or
-                    report.get("reason") != "controller_confirmed_stop"):
-                raise RuntimeError("Invalid completion marker; refusing restart.")
+            allowed_reasons = (
+                {"controller_confirmed_stop"}
+                if scenario_key == "clear"
+                else {"controller_confirmed_stop",
+                      "kinematic_proximity_limit",
+                      "observation_window_complete"}
+            )
+            if (report.get("completed") is not True
+                    or report.get("reason") not in allowed_reasons
+                    or report.get("scenario", scenario_key) != scenario_key):
+                raise RuntimeError(
+                    "Invalid or mismatched scenario completion marker"
+                )
             rounds += 1
-            print(f"Confirmed stop cycle #{rounds}. CARLA actors cleaned. "
-                  "Recreating scene for the next run...", flush=True)
+            print(
+                f"CYCLE {rounds} | {scenario_key.upper()} | "
+                f"observed={report['reason']} | "
+                f"min_center_distance_m={report.get('minimum_center_distance_m', 'n/a')} "
+                "| actors cleaned; next scene starting...",
+                flush=True,
+            )
             if args.cycles and rounds >= args.cycles:
                 break
             for _ in range(6):
