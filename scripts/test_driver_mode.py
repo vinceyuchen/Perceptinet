@@ -159,8 +159,8 @@ def main():
         case = copy.deepcopy(snapshot)
         case["hazard"]["control_level"] = level
         case["hazard"]["primary"]["hazard_level"] = level
-        if level == "CRITICAL":
-            case["braking"]["emergency"] = True
+        case["braking"]["active"] = level != "NORMAL"
+        case["braking"]["emergency"] = level == "CRITICAL"
         with patch.object(renderer, "_put_text",
                           wraps=renderer._put_text) as text_spy:
             renderer._draw_hazard(renderer._base_canvas.copy(), case, stale=False)
@@ -182,8 +182,8 @@ def main():
         case = copy.deepcopy(snapshot)
         case["hazard"]["control_level"] = level
         case["hazard"]["primary"]["hazard_level"] = level
-        if level == "CRITICAL":
-            case["braking"]["emergency"] = True
+        case["braking"]["active"] = level != "NORMAL"
+        case["braking"]["emergency"] = level == "CRITICAL"
         assert renderer._unified_status_color(case, stale=False) == expected_color
         action = renderer._vehicle_action(case)
         with patch.object(renderer, "_put_text",
@@ -206,6 +206,17 @@ def main():
             ]
             assert vehicle_colors == [expected_color]
     assert renderer._unified_status_color(snapshot, stale=True) == (178, 178, 178)
+
+    # A vehicle can still be driving with a CAUTION pedestrian present.
+    # Both cards must show CAUTION yellow, not yellow+green.
+    moving_caution = copy.deepcopy(snapshot)
+    moving_caution["hazard"]["control_level"] = "CAUTION"
+    moving_caution["hazard"]["primary"]["hazard_level"] = "CAUTION"
+    moving_caution["braking"]["active"] = False
+    assert renderer._vehicle_action(moving_caution) == "DRIVING"
+    assert renderer._unified_status_color(
+        moving_caution, stale=False
+    ) == caution
 
     critical = dict(snapshot)
     critical["hazard"] = dict(snapshot["hazard"])
