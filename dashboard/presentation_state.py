@@ -101,14 +101,18 @@ def derive_presentation_state(
         data_status = "V2I DEGRADED"
         display_health = "DATA LIMITED"
         perception_text = "COOPERATIVE LIMITED"
-        if experiment.get("kinematic_contact_observed"):
-            # Simulator envelope overlap; not a proven physical crash.
-            vehicle_action = "CONTACT (SIM)"
-        elif any(
+
+    # Pedestrian contact is an observed outcome in EITHER test, rather
+    # than a predetermined label assigned only to the rainy scene.
+    if not stale and experiment.get("scenario") in ("clear", "rain_v2i"):
+        if any(
             str(event.get("other_type", "")).startswith("walker.")
             for event in experiment.get("carla_collision_events", [])
         ):
             vehicle_action = "CARLA CONTACT"
+        elif experiment.get("kinematic_contact_observed"):
+            # Geometric contact is not a full physics-simulated crash.
+            vehicle_action = "CONTACT (SIM)"
 
     if stale:
         footer_message = "COOPERATIVE DATA STALE"
