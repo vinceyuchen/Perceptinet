@@ -278,8 +278,9 @@ def main(argv=None) -> int:
         print("Snapshot:", SNAPSHOT)
         print("Launcher verifies CARLA world/map RPC before scene startup.")
         print("Selected scenario:", args.scenario)
-        print("Clear scene requires confirmed stop; rainy scene also permits "
-              "measured proximity-limit completion (not a collision).")
+        print("Both scenarios use an identical walking pedestrian, and "
+              "each cycle reports measured outcomes rather than "
+              "pre-labeling a safe stop or collision.")
         print("Requirements: CARLA server 127.0.0.1:2000, Python carla/cv2/YOLO.")
         return 0
 
@@ -385,15 +386,13 @@ def main(argv=None) -> int:
                       "marker (for example, camera window Q). Stopping.")
                 break
             report = json.loads(CYCLE_FILE.read_text(encoding="utf-8"))
-            allowed_reasons = (
-                {"controller_confirmed_stop"}
-                if scenario_key == "clear"
-                else {"controller_confirmed_stop",
-                      "kinematic_contact",
-                      "collision_sensor_event",
-                      "kinematic_proximity_limit",
-                      "observation_window_complete"}
-            )
+            allowed_reasons = {
+                "controller_confirmed_stop",
+                "kinematic_contact",
+                "collision_sensor_event",
+                "kinematic_proximity_limit",
+                "observation_window_complete",
+            }
             if (report.get("completed") is not True
                     or report.get("reason") not in allowed_reasons
                     or report.get("scenario", scenario_key) != scenario_key):
@@ -404,6 +403,7 @@ def main(argv=None) -> int:
             print(
                 f"CYCLE {rounds} | {scenario_key.upper()} | "
                 f"observed={report['reason']} | "
+                f"safe_stop_verified={report.get('safe_stop_verified', 'unknown')} | "
                 f"min_center_distance_m={report.get('minimum_center_distance_m', 'n/a')} "
                 "| actors cleaned; next scene starting...",
                 flush=True,
@@ -415,7 +415,7 @@ def main(argv=None) -> int:
                     print("Operator exit requested.")
                     return 0
                 time.sleep(0.25)
-        print(f"Demo ended normally. Confirmed completed cycles: {rounds}")
+        print(f"Demo ended normally. Completed scene cycles: {rounds}")
         return 0
     except KeyboardInterrupt:
         print("\nDemo interrupted. Asking the CARLA scene to clean up...")
