@@ -286,6 +286,12 @@ class DriverModeRenderer:
         """
         if stale:
             return MUTED
+        experiment = snapshot.get("experiment") or {}
+        if experiment.get("kinematic_contact_observed") or any(
+            str(e.get("other_type", "")).startswith("walker.")
+            for e in experiment.get("carla_collision_events", [])
+        ):
+            return SEVERE_RED
         level = str((snapshot.get("hazard") or {}).get(
             "control_level", "NORMAL"
         )).upper()
