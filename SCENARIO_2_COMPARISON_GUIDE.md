@@ -9,6 +9,20 @@
 5. Double-click `START_RAIN_SCENARIO_DEMO.bat` to loop **Scenario 2 only**.
 6. Existing `START_TEACHER_DEMO.bat` remains **Scenario 1 only**.
 
+Scenario 2 now uses CARLA `WalkerControl`: the pedestrian starts crossing
+when Ego is approximately 8.5 m along its travel direction, walking at
+1.05 m/s across the lane. Scenario 1's pedestrian remains stationary.
+The experiment tests whether the degraded V2I channel causes a late
+response to an actual moving road user. Neither braking nor contact is
+forced to fail: outcomes are observed and reported.
+
+The rainy scene also attaches a `sensor.other.collision` to Ego.
+A CARLA walker collision sensor event is recorded separately from a
+2D bounding-footprint overlap. Because Ego is still moved kinematically,
+an envelope overlap is marked `kinematic_contact` / `CONTACT (SIM)`,
+**not** a physically simulated crash. The Dashboard says `CARLA CONTACT`
+only if CARLA reports an actual walker collision event.
+
 Alternating rounds: **1 = Clear cooperative baseline**, **2 = Heavy rain with simulated V2I degradation**, then repeat. Each run recreates the CARLA scene, and the dashboard consumes a session-private live snapshot. Quit with `Q` in the camera window or launcher console, or close the dashboard.
 
 ## Scenario 2 fault mechanism
@@ -34,9 +48,19 @@ Each cycle produces an isolated `results/teacher_demo/runs/cycle_*/scenario_resu
 - First RSU pedestrian observation, first fused pedestrian, and first braking trigger (CARLA sim times).
 - Whether the controller confirmed stopping or the kinematic motion guard ended the scene.
 - Minimum Ego-to-pedestrian **centre-point** separation and V2I drops/deliveries.
-- An explicit `collision_sensor_available: false` and `physical_collision_observed: null`.
+- A collision-sensor availability flag and any observed CARLA collision events.
+- An independent `kinematic_contact_observed` flag for 2D footprint overlap.
+- A pedestrian-crossing-started flag and `kinematic_contact` completion if applicable.
+- `physical_collision_observed` is `null` when no sensor is available; with a
+  sensor, it reflects actual reported walker collision **events**, not
+  fabricated visual overlap.
 
-**No physical collision claim can be made from this demo.** In the existing scenario vehicle physics is disabled and the Ego is moved by deterministic transforms. A close approach / guard-trigger is a kinematic proximity event, not measured CARLA impact. For physical collisions a separate physics-enabled validation scene with a collision sensor would be needed.
+**Do not equate a footprint overlap with a physical collision.**
+The Ego still uses deterministic kinematic transforms with vehicle physics
+disabled, even though the walker can now walk under CARLA control. A CARLA
+collision sensor may emit an event in this configuration, but full impact
+dynamics are not simulated. A real vehicle-physics collision demonstration
+requires a separate physics-enabled Ego and validated sensor behavior.
 
 This is a stress test and controlled fault injection, **not a calibrated meteorological propagation model**. Scenario 2 may still stop safely if enough valid perceptions arrive. Never label the observed outcome as failure/collision without the measured evidence.
 
