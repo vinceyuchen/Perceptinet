@@ -9,14 +9,18 @@
 5. Double-click `START_RAIN_SCENARIO_DEMO.bat` to loop **Scenario 2 only**.
 6. Existing `START_TEACHER_DEMO.bat` remains **Scenario 1 only**.
 
-Scenario 2 now uses CARLA `WalkerControl`: the pedestrian starts crossing
-when Ego is approximately 8.5 m along its travel direction, walking at
-1.05 m/s across the lane. Scenario 1's pedestrian remains stationary.
-The experiment tests whether the degraded V2I channel causes a late
-response to an actual moving road user. Neither braking nor contact is
-forced to fail: outcomes are observed and reported.
+**Both Scenario 1 and Scenario 2 now use the same moving CARLA pedestrian.**
+CARLA `WalkerControl` begins crossing when the pedestrian is approximately
+11.5 m longitudinally ahead of Ego, walking at 0.95 m/s toward the opposite
+side of the road. Both scenes use identical initial geometry, walker speed,
+trigger distance, YOLO26n and Risk/Braking logic; only the weather and V2I
+treatment differ. Scenario 1 is a normal-communication early-braking test,
+not an automatically guaranteed successful stop. Per-cycle
+`safe_stop_verified` is true only if the vehicle stopped, the walker truly
+moved, no contact was observed, and minimum measured centre distance exceeds
+the model contact envelope plus 0.3 m.
 
-The rainy scene also attaches a `sensor.other.collision` to Ego.
+Both teacher-demo scenes attach a `sensor.other.collision` to Ego.
 A CARLA walker collision sensor event is recorded separately from a
 2D bounding-footprint overlap. Because Ego is still moved kinematically,
 an envelope overlap is marked `kinematic_contact` / `CONTACT (SIM)`,
@@ -53,6 +57,8 @@ Each cycle produces an isolated `results/teacher_demo/runs/cycle_*/scenario_resu
 - `pedestrian_crossing_started`, `pedestrian_motion_verified`, and
   `pedestrian_walked_m` from actual CARLA pedestrian world-position updates.
 - `kinematic_contact` completion when the 2D model envelopes overlap.
+- `safe_stop_verified`, `crossing_started_sim_s`, and
+  `brake_before_crossing_s` (positive means braking began before walking).
 - `physical_collision_observed` is `null` when no sensor is available; with a
   sensor, it reflects actual reported walker collision **events**, not
   fabricated visual overlap.
@@ -65,6 +71,17 @@ dynamics are not simulated. A real vehicle-physics collision demonstration
 requires a separate physics-enabled Ego and validated sensor behavior.
 
 This is a stress test and controlled fault injection, **not a calibrated meteorological propagation model**. Scenario 2 may still stop safely if enough valid perceptions arrive. Never label the observed outcome as failure/collision without the measured evidence.
+
+To generate a measured PDF and CSV report after completing test cycles:
+
+```powershell
+py -3.12 -m pip install reportlab
+py -3.12 .\scripts\generate_teacher_demo_report.py
+```
+
+Outputs are written to `results/teacher_demo/report`. The reporter is now
+tracked in GitHub; no separate downloaded script is needed. With no run
+data, fields remain pending and no collision or success is fabricated.
 
 To run one variant from the CLI:
 
