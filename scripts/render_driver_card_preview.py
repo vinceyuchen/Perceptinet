@@ -58,7 +58,7 @@ def main():
     thumbs = []
     for name, snapshot in cases:
         frame = app.render(snapshot, stale=False)
-        path = output / f"driver_mode_v71_{name}.png"
+        path = output / f"driver_mode_v73_{name}.png"
         if not cv2.imwrite(str(path), frame):
             raise RuntimeError(f"Failed to save {path}")
         thumbs.append(cv2.resize(frame, (800, 450), interpolation=cv2.INTER_AREA))
@@ -67,10 +67,10 @@ def main():
         np.hstack(thumbs[2:4]),
         np.hstack(thumbs[4:6]),
     ))
-    contact_path = output / "driver_mode_v71_status_comparison.png"
+    contact_path = output / "driver_mode_v73_status_comparison.png"
     if not cv2.imwrite(str(contact_path), contact):
         raise RuntimeError(f"Failed to save {contact_path}")
-    print("SYNTHETIC DRIVER CARD V7.1 PREVIEWS READY")
+    print("SYNTHETIC DRIVER CARD V7.3 PREVIEWS READY")
     print("Non-live demonstration only; status colors and class icons are illustrative.")
     print(f"Overview: {contact_path}")
 
