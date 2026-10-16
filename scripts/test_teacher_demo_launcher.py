@@ -78,6 +78,8 @@ def main() -> None:
               patch.object(launcher, "CYCLE_FILE", folder / "cycle_complete.json"),
               patch.object(launcher, "check_project"),
               patch.object(launcher, "launch_carla_if_needed", return_value=None),
+              patch.object(launcher, "wait_for_carla_rpc",
+                           return_value="Carla/Maps/Town10HD_Opt"),
               patch.object(launcher.subprocess, "Popen", side_effect=spawn),
               patch.object(launcher, "request_dashboard_close"),
               patch.object(launcher, "keyboard_quit", return_value=False)):
