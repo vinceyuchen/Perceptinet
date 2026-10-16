@@ -2558,47 +2558,27 @@ def main():
                     interpolation=cv2.INTER_AREA,
                 )
 
-                if rain_demo:
-                    add_header(onboard_view, "ONBOARD / HEAVY RAIN")
-                    add_header(rsu_view, "RSU-01 / V2I FAULT TEST")
+                if teacher_demo:
+                    # Clean teacher-facing video: show the real YOLO
+                    # detection boxes and compact camera identifiers only.
+                    # Crossing, weather, V2I impairment and contact events
+                    # remain in the Dashboard / live logs / saved metrics.
+                    add_header(onboard_view, "ONBOARD")
+                    add_header(rsu_view, "RSU-01")
                 else:
+                    # Preserve the diagnostic overlays for standalone runs.
                     add_header(onboard_view, "ONBOARD PERCEPTION")
                     add_header(rsu_view, "RSU-01 PERCEPTION")
-
-                add_status(
-                    onboard_view,
-                    "Pedestrian: NOT DETECTED"
-                    if onboard_ped is None
-                    else world_position_text(onboard_ped),
-                )
-
-                add_status(
-                    rsu_view,
-                    world_position_text(rsu_ped),
-                )
-                if teacher_demo:
                     add_status(
                         onboard_view,
-                        ("WALKER CROSSING" if crossing_started
-                         else "WALKER WAITING TO CROSS"),
-                        y=113,
+                        "Pedestrian: NOT DETECTED"
+                        if onboard_ped is None
+                        else world_position_text(onboard_ped),
                     )
-                if not rain_demo and teacher_demo:
-                    add_status(rsu_view, "V2I LINK NORMAL", y=113)
-                if rain_demo:
-                    if (degraded_v2i.outage_started_s is not None
-                            and float(onboard_timestamp)
-                            - degraded_v2i.outage_started_s
-                            < teacher_scenario.blackout_s):
-                        channel_overlay = "INJECTED V2I BLACKOUT"
-                    elif delivered_rsu is None:
-                        channel_overlay = "RSU DATA DELAYED / DROPPED"
-                    else:
-                        channel_overlay = (
-                            "V2I ARRIVED: "
-                            f"{delivered_rsu['v2i']['latency_ms']:.0f}ms"
-                        )
-                    add_status(rsu_view, channel_overlay, y=113)
+                    add_status(
+                        rsu_view,
+                        world_position_text(rsu_ped),
+                    )
 
                 combined = np.hstack(
                     (onboard_view, rsu_view)
