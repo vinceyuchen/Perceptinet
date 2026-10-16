@@ -2576,6 +2576,15 @@ def main():
                     rsu_view,
                     world_position_text(rsu_ped),
                 )
+                if teacher_demo:
+                    add_status(
+                        onboard_view,
+                        ("WALKER CROSSING" if crossing_started
+                         else "WALKER WAITING TO CROSS"),
+                        y=113,
+                    )
+                if not rain_demo and teacher_demo:
+                    add_status(rsu_view, "V2I LINK NORMAL", y=113)
                 if rain_demo:
                     if (degraded_v2i.outage_started_s is not None
                             and float(onboard_timestamp)
