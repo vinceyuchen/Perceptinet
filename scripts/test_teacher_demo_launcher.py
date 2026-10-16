@@ -44,6 +44,7 @@ def main() -> None:
         scenario_count = [0]
         dashboard_snapshots = []
         scenario_snapshots = []
+        scenario_modes = []
 
         def spawn(command, **kwargs):
             script = str(command[1]).replace("\\", "/")
@@ -54,6 +55,7 @@ def main() -> None:
             assert script.endswith("scripts/run_occluded_pedestrian_braking_v1.py")
             scenario_count[0] += 1
             env = kwargs["env"]
+            scenario_modes.append(env["PERCEPTINET_DEMO_SCENARIO"])
             assert env["PERCEPTINET_TEACHER_DEMO"] == "1"
             scenario_snapshots.append(
                 env["PERCEPTINET_DEMO_SNAPSHOT_FILE"]
@@ -64,7 +66,10 @@ def main() -> None:
             assert "PERCEPTINET_VALIDATION" not in env
             info = {
                 "completed": True,
-                "reason": "controller_confirmed_stop",
+                "reason": ("controller_confirmed_stop"
+                           if scenario_modes[-1] == "clear"
+                           else "kinematic_proximity_limit"),
+                "scenario": scenario_modes[-1],
                 "frame_id": 100 + scenario_count[0],
             }
             markers.append(info)
@@ -83,9 +88,13 @@ def main() -> None:
               patch.object(launcher.subprocess, "Popen", side_effect=spawn),
               patch.object(launcher, "request_dashboard_close"),
               patch.object(launcher, "keyboard_quit", return_value=False)):
-            assert launcher.main(["--cycles", "2", "--hold-seconds", "1"]) == 0
+            assert launcher.main([
+                "--cycles", "2", "--hold-seconds", "1",
+                "--scenario", "alternate",
+            ]) == 0
             assert scenario_count[0] == 2
             assert len(markers) == 2
+            assert scenario_modes == ["clear", "rain_v2i"]
             assert len(dashboard_snapshots) == 1
             assert len(scenario_snapshots) == 2
             assert scenario_snapshots == dashboard_snapshots * 2
