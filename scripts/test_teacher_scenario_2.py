@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -106,6 +107,13 @@ def main() -> None:
     renderer = DriverModeRenderer()
     assert renderer._unified_status_color(snapshot, stale=False) == ALERT_YELLOW
     assert renderer._unified_status_color(snapshot, stale=True) != ALERT_YELLOW
+    # In an impaired-link NORMAL frame, not seeing an object does not
+    # mean the road is confirmed safe.
+    with patch.object(renderer, "_target_heading") as target:
+        renderer._draw_hazard(renderer._base_canvas.copy(), snapshot, stale=False)
+    target.assert_called_once()
+    assert target.call_args.args[1] == "UNCONFIRMED"
+    assert target.call_args.kwargs["accent"] == ALERT_YELLOW
 
     print("HEAVY RAIN / SIMULATED V2I DELIVERY TEST PASSED")
 
