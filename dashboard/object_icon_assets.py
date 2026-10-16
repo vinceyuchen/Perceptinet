@@ -26,6 +26,9 @@ _MASKS = {
     "TRUCK": "c-pPdu?@f=3<SVOE*OJR7|lpoj8s_zDN9fwoP0<DMY_1S!tz^|fv4;)IGTj!#RB*&8IT_gv?}ehk+!dt=M5$Bo*HRW+Fwtzqw8+At&aXQIkIDq?|>GedDb-`rtz2ycjb!)",
     "MOTORCYCLE": "c-nQ)u?+(u3<Xf5D<~O(P2$BO!Dx)a2$U`mKmNy^PKpu>y~4&eLS#qkR42u9!c;m^6-AG*f)+7P*O{3Tx>qGwuI$1yq0j($J_0^E1Lj3|lN4|PJb2}{9*^ypBhh`ly&Ws|;^yJbY*bDE8fcZb+KcZr`7&<@js5x-`2ZpIf$I",
     "PEDESTRIAN": "c-no=F%H5o3<Xd}9Wwd`_$K693`owFkt=oM8mW4Luz84LY!$UdLj2(kUrua*Eg`$uT$01o|9PH_6@KLka0g(a0ic#|S=D+{wJ#>s*&gtK-EGUMxv5?tG*!&et@s-JXtWG2lGdJ{o!!B!khwH0W{qW}7BY5{X(quQYiiMNsKL#jORTE<Ue6nmsBF^",
+    # Supplied shield-check and exclamation SVGs, rasterized to 48x48.
+    "SAFE": "c-n=~!3hH)5Czb`2=QnMTZ*MAY$0jIbYck}cR~D_Z%l4W=J0Spov*-M`6|=UlC&m~0~@VAW+%&Eueq}^+o?Kz$>$-1myaOxE=!a($!4=)7f3G0O0tY(|GJYW5Nz1A&g2EK@fiyJdl6!np-ES6KLKyLri6q",
+    "UNCONFIRMED": "c-nQ4!3{$p3`1RU;P^*i6h@<?F$yDa<bb|wlU}Ooqv#!ykk|pr0`MZ=Kqd!JNTn*dfkxggs+`Q8I5K-S$K{yCT)}GYVB@@a|C9d0XRaqoQ8P71?}ydYUR8H-ze3a2kvH=ZnVgh<we@fm?!HdLbzC5>aW3-#g5<@3",
 }
 
 ICON_ALIASES = {
@@ -33,6 +36,8 @@ ICON_ALIASES = {
     "BICYCLE": "MOTORCYCLE",
     "PERSON": "PEDESTRIAN",
     "MOTORBIKE": "MOTORCYCLE",
+    "ROAD CLEAR": "SAFE",
+    "ROAD_CLEAR": "SAFE",
 }
 
 
@@ -55,7 +60,8 @@ def _alpha_mask(kind: str, side: int) -> np.ndarray | None:
 
 def draw_icon(canvas: np.ndarray, center: Tuple[int, int], kind: str,
               *, size: int = 13, primary: bool = False,
-              stale: bool = False) -> bool:
+              stale: bool = False,
+              color: Tuple[int, int, int] | None = None) -> bool:
     """Alpha-composite a monochrome SVG-derived marker into a BGR dashboard.
 
     Stale tones are dimmed; a primary target gets a visible surrounding ring.
@@ -94,7 +100,14 @@ def draw_icon(canvas: np.ndarray, center: Tuple[int, int], kind: str,
     if stale:
         a *= 0.55
     ink = 202 if stale else 247 if kind == "EGO" or primary else 218
+    # Only the dominant target card supplies a semantic RGB/BGR tint;
+    # Road Map target markers remain neutral unless explicitly requested.
+    foreground = (
+        np.asarray(color, dtype=np.float32)
+        if color is not None and not stale
+        else np.asarray((ink, ink, ink), dtype=np.float32)
+    )
     region = canvas[top:bottom, left:right]
     region[:] = np.rint(region.astype(np.float32) * (1-a[..., None])
-                        + ink * a[..., None]).astype(np.uint8)
+                        + foreground * a[..., None]).astype(np.uint8)
     return True
