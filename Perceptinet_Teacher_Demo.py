@@ -49,6 +49,59 @@ def connected(host: str = CARLA_HOST, port: int = CARLA_PORT) -> bool:
         return False
 
 
+def carla_rpc_probe(timeout_s: float = 5.0) -> str:
+    """Confirm an actual CARLA RPC world/map response, not just TCP accept.
+
+    Import CARLA only at runtime, so --dry-run and no-CARLA tests work.
+    Each call has a finite timeout even if Unreal is unresponsive.
+    """
+    import carla
+
+    client = carla.Client(CARLA_HOST, CARLA_PORT)
+    client.set_timeout(float(timeout_s))
+    world = client.get_world()
+    return str(world.get_map().name)
+
+
+def wait_for_carla_rpc(timeout_s: float, *, interval_s: float = 2.0) -> str:
+    """Wait for CARLA to answer world/map RPC; respect quit requests."""
+    deadline = time.monotonic() + max(1.0, timeout_s)
+    attempt = 0
+    last_error: Exception | None = None
+    while True:
+        if keyboard_quit():
+            raise KeyboardInterrupt("CARLA startup cancelled by operator.")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        attempt += 1
+        # A reachable port can still belong to an unready or hung
+        # simulator; short RPC calls allow repeated health checks.
+        try:
+            map_name = carla_rpc_probe(min(6.0, remaining))
+            print(f"CARLA RPC READY | map={map_name} | attempt={attempt}",
+                  flush=True)
+            return map_name
+        except (RuntimeError, OSError, TimeoutError) as exc:
+            last_error = exc
+            print(
+                f"CARLA port may be open, but world/map RPC not ready "
+                f"(attempt {attempt}): {exc}",
+                flush=True,
+            )
+        if keyboard_quit():
+            raise KeyboardInterrupt("CARLA startup cancelled by operator.")
+        time.sleep(min(interval_s, max(0.0, deadline-time.monotonic())))
+    raise TimeoutError(
+        f"CARLA did not answer world/map RPC within {timeout_s:g} seconds. "
+        "TCP port 2000 alone is insufficient. Check whether Unreal CARLA "
+        "is frozen or still loading, close old scenario processes and "
+        "manually restart the CARLA simulator if it remains unresponsive. "
+        "The launcher will not terminate an existing CARLA server."
+        + (f" Last error: {last_error}" if last_error else "")
+    )
+
+
 def executable_candidates() -> list[Path]:
     """Look for common Windows CARLA installations, without guessing success."""
     hints = [
@@ -70,7 +123,9 @@ def find_carla_exe(requested: str | None) -> Path | None:
 
 def launch_carla_if_needed(args) -> subprocess.Popen | None:
     if connected():
-        print("CARLA server detected on 127.0.0.1:2000.")
+        print("CARLA TCP port 2000 detected. Checking world/map RPC...",
+              flush=True)
+        wait_for_carla_rpc(args.carla_ready_timeout)
         return None
     exe = find_carla_exe(args.carla_exe)
     if not exe:
@@ -88,13 +143,16 @@ def launch_carla_if_needed(args) -> subprocess.Popen | None:
     deadline = time.monotonic() + args.carla_start_timeout
     while time.monotonic() < deadline:
         if connected():
-            print("CARLA port is open. Waiting briefly for map startup...")
-            time.sleep(5)
+            print("CARLA port is open; waiting for real world/map RPC...",
+                  flush=True)
+            wait_for_carla_rpc(args.carla_ready_timeout)
             return server
         if server.poll() is not None:
             raise RuntimeError(
                 f"CARLA executable exited early (code {server.returncode})."
             )
+        if keyboard_quit():
+            raise KeyboardInterrupt("Cancelled while CARLA was starting.")
         time.sleep(1)
     raise TimeoutError(
         "CARLA did not open port 2000 within "
@@ -181,6 +239,8 @@ def parse_args(argv=None):
     parser.add_argument("--carla-exe", default=None,
                         help="CARLA Windows server executable (if not running).")
     parser.add_argument("--carla-start-timeout", type=float, default=120.0)
+    parser.add_argument("--carla-ready-timeout", type=float, default=90.0,
+                        help="Wait for real get_world/get_map RPC response.")
     parser.add_argument("--hold-seconds", type=float, default=3.0,
                         help="Show confirmed STOPPED state before each reset.")
     parser.add_argument("--max-round-seconds", type=float, default=300.0,
@@ -196,6 +256,8 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    if args.carla_ready_timeout < 1:
+        raise ValueError("carla-ready-timeout must be >= 1 second.")
     if args.cycles < 0 or args.max_round_seconds < 5:
         raise ValueError("Cycles must be >= 0, max round seconds >= 5.")
     if not 1.0 <= args.hold_seconds <= 15.0:
@@ -207,6 +269,7 @@ def main(argv=None) -> int:
         print("Scenario:", SCENARIO)
         print("Dashboard:", DASHBOARD)
         print("Snapshot:", SNAPSHOT)
+        print("Launcher verifies CARLA world/map RPC before scene startup.")
         print("Scenario exits for restart ONLY on a confirmed physical stop.")
         print("Requirements: CARLA server 127.0.0.1:2000, Python carla/cv2/YOLO.")
         return 0
@@ -245,6 +308,9 @@ def main(argv=None) -> int:
         print("Closing the Dashboard also stops the launcher.\n", flush=True)
 
         while args.cycles == 0 or rounds < args.cycles:
+            # Recheck simulator responsiveness between cycles.
+            if rounds > 0:
+                wait_for_carla_rpc(args.carla_ready_timeout)
             if dashboard.poll() is not None:
                 print("Dashboard closed. Ending demonstration.")
                 break
