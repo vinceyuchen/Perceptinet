@@ -6,7 +6,8 @@
 2. Run `py -3.12 scripts/test_teacher_scenario_2.py` and `py -3.12 scripts/test_teacher_demo_launcher.py`.
 3. Ensure CARLA on `127.0.0.1:2000` responds to `get_world()` and `get_map()`.
 4. Double-click `START_COMPARISON_DEMO.bat` for alternating scenarios.
-5. Existing `START_TEACHER_DEMO.bat` remains **Scenario 1 only**.
+5. Double-click `START_RAIN_SCENARIO_DEMO.bat` to loop **Scenario 2 only**.
+6. Existing `START_TEACHER_DEMO.bat` remains **Scenario 1 only**.
 
 Alternating rounds: **1 = Clear cooperative baseline**, **2 = Heavy rain with simulated V2I degradation**, then repeat. Each run recreates the CARLA scene, and the dashboard consumes a session-private live snapshot. Quit with `Q` in the camera window or launcher console, or close the dashboard.
 
