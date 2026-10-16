@@ -558,9 +558,11 @@ class DriverModeRenderer:
         primary = self._active_primary(snapshot)
         accent = self._unified_status_color(snapshot, stale=stale)
 
-        if level == "NORMAL":
+        if level == "NORMAL" and accent == SAFE_GREEN:
             label = "SAFE"
         elif primary is None:
+            # No validated target while braking is active or risk is
+            # elevated: avoid a misleading green-style SAFE claim.
             label = "UNCONFIRMED"
         else:
             label = str(primary.get("class_name") or "UNCONFIRMED").upper()
