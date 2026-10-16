@@ -1620,6 +1620,12 @@ def main():
         print("Press Q / Esc or Ctrl+C to stop.")
 
         crossing = None
+        pedestrian_last_xy = (
+            settled_pedestrian.location.x,
+            settled_pedestrian.location.y,
+        )
+        pedestrian_actual_walk_distance_m = 0.0
+        pedestrian_walk_motion_confirmed = False
         if rain_demo:
             # Actual walker locomotion and animation are produced by CARLA
             # WalkerControl; Scenario 1 keeps its original stationary actor.
@@ -1793,6 +1799,22 @@ def main():
                 pedestrian.get_transform().location
             )
             min_true_separation_m = min(min_true_separation_m, true_separation)
+            if rain_demo:
+                observed_ped = pedestrian.get_transform().location
+                current_xy = (observed_ped.x, observed_ped.y)
+                pedestrian_actual_walk_distance_m += math.hypot(
+                    current_xy[0] - pedestrian_last_xy[0],
+                    current_xy[1] - pedestrian_last_xy[1],
+                )
+                pedestrian_last_xy = current_xy
+                if (pedestrian_actual_walk_distance_m >= 0.20
+                        and not pedestrian_walk_motion_confirmed):
+                    pedestrian_walk_motion_confirmed = True
+                    print(
+                        "SCENARIO 2 | WALKING VERIFIED BY CARLA POSITION | "
+                        f"distance={pedestrian_actual_walk_distance_m:.2f}m",
+                        flush=True,
+                    )
             if rain_demo and not kinematic_contact:
                 ego_pose = ego_vehicle.get_transform()
                 pedestrian_pose = pedestrian.get_transform()
@@ -2401,6 +2423,10 @@ def main():
                     )
                     dashboard_snapshot["experiment"].update({
                         "pedestrian_crossing_started": crossing_started,
+                        "pedestrian_motion_verified": pedestrian_walk_motion_confirmed,
+                        "pedestrian_walked_m": round(
+                            pedestrian_actual_walk_distance_m, 3
+                        ),
                         "kinematic_contact_observed": kinematic_contact,
                         "carla_collision_events": list(collision_events),
                     })
@@ -2603,14 +2629,14 @@ def main():
                 # scenario guard with NO braking trigger. The actor physics
                 # is disabled, so this is a measured proximity-limit event,
                 # NOT a physical CARLA collision.
-                if stop_reported:
-                    scenario_end_reason = "controller_confirmed_stop"
-                elif (rain_demo and
-                      any(e["other_type"].startswith("walker.")
-                          for e in collision_events)):
+                if (rain_demo and
+                        any(e["other_type"].startswith("walker.")
+                            for e in collision_events)):
                     scenario_end_reason = "collision_sensor_event"
                 elif rain_demo and kinematic_contact:
                     scenario_end_reason = "kinematic_contact"
+                elif stop_reported:
+                    scenario_end_reason = "controller_confirmed_stop"
                 elif rain_demo and motion_guard_triggered:
                     scenario_end_reason = "kinematic_proximity_limit"
                 elif (rain_demo and first_sim_time_s is not None
@@ -2638,6 +2664,12 @@ def main():
                             ),
                             "kinematic_motion_guard": bool(motion_guard_triggered),
                             "pedestrian_crossing_started": bool(crossing_started),
+                            "pedestrian_motion_verified": bool(
+                                pedestrian_walk_motion_confirmed
+                            ),
+                            "pedestrian_walked_m": round(
+                                pedestrian_actual_walk_distance_m, 3
+                            ),
                             "kinematic_contact_observed": bool(kinematic_contact),
                             "kinematic_contact_time_s": kinematic_contact_time_s,
                             "collision_sensor_available": collision_sensor_available,
