@@ -76,9 +76,9 @@ def wait_for_carla_rpc(timeout_s: float, *, interval_s: float = 2.0) -> str:
             break
         attempt += 1
         # A reachable port can still belong to an unready or hung
-        # simulator; short RPC calls allow repeated health checks.
+        # simulator; bounded RPC calls allow repeated health checks.
         try:
-            map_name = carla_rpc_probe(min(6.0, remaining))
+            map_name = carla_rpc_probe(min(12.0, remaining))
             print(f"CARLA RPC READY | map={map_name} | attempt={attempt}",
                   flush=True)
             return map_name
