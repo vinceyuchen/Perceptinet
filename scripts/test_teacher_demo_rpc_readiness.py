@@ -49,7 +49,7 @@ def main() -> None:
                      side_effect=RuntimeError("time-out")) as rpc,
         patch.object(demo, "keyboard_quit", return_value=False),
         patch.object(demo.time, "monotonic",
-                     side_effect=[0.0, 0.1, 1.1]),
+                     side_effect=[0.0, 0.1, 0.3, 1.1]),
         patch.object(demo.time, "sleep"),
     ):
         try:
