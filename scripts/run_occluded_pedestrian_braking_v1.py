@@ -2219,9 +2219,15 @@ def main():
             ego_command_speed_mps = braking_command[
                 "target_speed_mps"
             ]
-            if teacher_demo and kinematic_contact:
-                # Playback termination after measured envelope intersection.
-                # This is NOT an emergency command from the risk model.
+            if teacher_demo and (
+                kinematic_contact
+                or any(
+                    event.get("other_type", "").startswith("walker.")
+                    for event in collision_events
+                )
+            ):
+                # Freeze the kinematic replay after observed contact, but do
+                # NOT disguise the stop as a BrakingController achievement.
                 ego_command_speed_mps = 0.0
 
             # Final simulation failsafe.
