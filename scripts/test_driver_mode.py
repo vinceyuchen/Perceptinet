@@ -137,7 +137,75 @@ def main():
         no_primary = copy.deepcopy(snapshot)
         no_primary["hazard"]["primary"]["longitudinal_m"] = 0.0
         renderer._draw_hazard(renderer._base_canvas.copy(), no_primary, stale=False)
-        assert not icon_spy.called
+        assert any(c.args[2] == "UNCONFIRMED"
+                   for c in icon_spy.call_args_list)
+
+        icon_spy.reset_mock()
+        normal_heading = copy.deepcopy(snapshot)
+        normal_heading["hazard"]["control_level"] = "NORMAL"
+        renderer._draw_hazard(
+            renderer._base_canvas.copy(), normal_heading, stale=False
+        )
+        assert any(c.args[2] == "SAFE"
+                   for c in icon_spy.call_args_list)
+
+    # Target card has only one main heading. No extra risk subtitle.
+    for level, expected in (
+        ("NORMAL", "SAFE"),
+        ("CAUTION", "PEDESTRIAN"),
+        ("WARNING", "PEDESTRIAN"),
+        ("CRITICAL", "PEDESTRIAN"),
+    ):
+        case = copy.deepcopy(snapshot)
+        case["hazard"]["control_level"] = level
+        case["hazard"]["primary"]["hazard_level"] = level
+        if level == "CRITICAL":
+            case["braking"]["emergency"] = True
+        with patch.object(renderer, "_put_text",
+                          wraps=renderer._put_text) as text_spy:
+            renderer._draw_hazard(renderer._base_canvas.copy(), case, stale=False)
+            names = [call.args[1] for call in text_spy.call_args_list]
+        assert expected in names
+        assert "TARGET" not in names
+        assert "ROAD CLEAR" not in names
+        assert "UNCONFIRMED" not in names
+        assert level not in names
+        assert "DISTANCE" in names and "TTC" in names
+
+    # The two cards share an IDENTICAL accent from the same risk state.
+    for level, expected_color in (
+        ("NORMAL", safe),
+        ("CAUTION", caution),
+        ("WARNING", warning),
+        ("CRITICAL", critical_color),
+    ):
+        case = copy.deepcopy(snapshot)
+        case["hazard"]["control_level"] = level
+        case["hazard"]["primary"]["hazard_level"] = level
+        if level == "CRITICAL":
+            case["braking"]["emergency"] = True
+        assert renderer._unified_status_color(case, stale=False) == expected_color
+        action = renderer._vehicle_action(case)
+        with patch.object(renderer, "_put_text",
+                          wraps=renderer._put_text) as write_spy:
+            renderer._draw_hazard(renderer._base_canvas.copy(), case, stale=False)
+            hazard_colors = [
+                c.kwargs["color"] for c in write_spy.call_args_list
+                if c.args[1] in ("PEDESTRIAN", "SAFE")
+            ]
+            assert hazard_colors == [expected_color]
+        with patch.object(renderer, "_put_text",
+                          wraps=renderer._put_text) as write_spy:
+            renderer._draw_vehicle(
+                renderer._base_canvas.copy(), case, stale=False,
+                presentation={"vehicle_action": action}
+            )
+            vehicle_colors = [
+                c.kwargs["color"] for c in write_spy.call_args_list
+                if c.args[1] == action
+            ]
+            assert vehicle_colors == [expected_color]
+    assert renderer._unified_status_color(snapshot, stale=True) == (178, 178, 178)
 
     critical = dict(snapshot)
     critical["hazard"] = dict(snapshot["hazard"])
@@ -260,7 +328,7 @@ def main():
     print("Cooperative source: RSU-01")
     print("Emergency state render: OK")
     print("Safe-stop state render: STOPPED")
-    print("v7.1 target-first cards, map label cleanup, status colors: OK")
+    print("v7.3 SAFE/UNCONFIRMED icons, one-line heading, unified severity: OK")
     print("Road-aware geometry and zero-distance NORMAL target: OK")
     print("DRIVER MODE TEST PASSED")
 
