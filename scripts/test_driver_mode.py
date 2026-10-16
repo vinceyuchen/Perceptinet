@@ -143,6 +143,7 @@ def main():
         icon_spy.reset_mock()
         normal_heading = copy.deepcopy(snapshot)
         normal_heading["hazard"]["control_level"] = "NORMAL"
+        normal_heading["braking"]["active"] = False
         renderer._draw_hazard(
             renderer._base_canvas.copy(), normal_heading, stale=False
         )
