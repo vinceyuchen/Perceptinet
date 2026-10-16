@@ -197,6 +197,7 @@ REMOVABLE_TEST_ACTOR_PREFIXES = (
     "vehicle.",
     "walker.pedestrian.",
     "sensor.camera.",
+    "sensor.other.collision",
     "controller.ai.walker",
 )
 
@@ -2398,6 +2399,11 @@ def main():
                     dashboard_snapshot["system_health"]["status"] = (
                         "DATA LIMITED"
                     )
+                    dashboard_snapshot["experiment"].update({
+                        "pedestrian_crossing_started": crossing_started,
+                        "kinematic_contact_observed": kinematic_contact,
+                        "carla_collision_events": list(collision_events),
+                    })
             try:
                 dashboard_data_layer.write_snapshot_json(
                     dashboard_snapshot,
@@ -2599,6 +2605,10 @@ def main():
                 # NOT a physical CARLA collision.
                 if stop_reported:
                     scenario_end_reason = "controller_confirmed_stop"
+                elif (rain_demo and
+                      any(e["other_type"].startswith("walker.")
+                          for e in collision_events)):
+                    scenario_end_reason = "collision_sensor_event"
                 elif rain_demo and kinematic_contact:
                     scenario_end_reason = "kinematic_contact"
                 elif rain_demo and motion_guard_triggered:
