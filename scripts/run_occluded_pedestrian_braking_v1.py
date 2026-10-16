@@ -2431,19 +2431,19 @@ def main():
                         "packet_loss_rate": 0.0,
                     },
                 }
+                dashboard_snapshot["experiment"].update({
+                    "pedestrian_crossing_started": crossing_started,
+                    "pedestrian_motion_verified": pedestrian_walk_motion_confirmed,
+                    "pedestrian_walked_m": round(
+                        pedestrian_actual_walk_distance_m, 3
+                    ),
+                    "crossing_started_sim_s": crossing_started_sim_s,
+                    "braking_started_sim_s": first_brake_time_s,
+                    "kinematic_contact_observed": kinematic_contact,
+                    "carla_collision_events": list(collision_events),
+                })
                 if rain_demo:
-                    dashboard_snapshot["system_health"]["status"] = (
-                        "DATA LIMITED"
-                    )
-                    dashboard_snapshot["experiment"].update({
-                        "pedestrian_crossing_started": crossing_started,
-                        "pedestrian_motion_verified": pedestrian_walk_motion_confirmed,
-                        "pedestrian_walked_m": round(
-                            pedestrian_actual_walk_distance_m, 3
-                        ),
-                        "kinematic_contact_observed": kinematic_contact,
-                        "carla_collision_events": list(collision_events),
-                    })
+                    dashboard_snapshot["system_health"]["status"] = "DATA LIMITED"
             try:
                 dashboard_data_layer.write_snapshot_json(
                     dashboard_snapshot,
@@ -2643,17 +2643,22 @@ def main():
                 # scenario guard with NO braking trigger. The actor physics
                 # is disabled, so this is a measured proximity-limit event,
                 # NOT a physical CARLA collision.
-                if (rain_demo and
-                        any(e["other_type"].startswith("walker.")
-                            for e in collision_events)):
+                # Apply the SAME failure/success criteria to both cases.
+                # Never classify a stopped car as safe if contact occurred.
+                with collision_lock:
+                    walker_collision = any(
+                        e["other_type"].startswith("walker.")
+                        for e in collision_events
+                    )
+                if walker_collision:
                     scenario_end_reason = "collision_sensor_event"
-                elif rain_demo and kinematic_contact:
+                elif kinematic_contact:
                     scenario_end_reason = "kinematic_contact"
                 elif stop_reported:
                     scenario_end_reason = "controller_confirmed_stop"
-                elif rain_demo and motion_guard_triggered:
+                elif motion_guard_triggered:
                     scenario_end_reason = "kinematic_proximity_limit"
-                elif (rain_demo and first_sim_time_s is not None
+                elif (first_sim_time_s is not None
                       and float(onboard_timestamp) - first_sim_time_s >= 16.0):
                     scenario_end_reason = "observation_window_complete"
 
@@ -2661,8 +2666,34 @@ def main():
                     if demo_stop_since is None:
                         demo_stop_since = time.monotonic()
                     if time.monotonic() - demo_stop_since >= demo_hold_s:
+                        # Collision sensor events and measured kinematic
+                        # footprint contact are separate forms of evidence.
+                        # Verify a safe baseline rather than assuming it.
+                        walker_radius = max(
+                            float(pedestrian.bounding_box.extent.x),
+                            float(pedestrian.bounding_box.extent.y),
+                            0.1,
+                        )
+                        nominal_contact_threshold_m = (
+                            float(ego_vehicle.bounding_box.extent.x)
+                            + walker_radius
+                        )
+                        safe_stop_verified = bool(
+                            stop_reported
+                            and crossing_started
+                            and pedestrian_walk_motion_confirmed
+                            and not kinematic_contact
+                            and not walker_collision
+                            and math.isfinite(min_true_separation_m)
+                            and min_true_separation_m >
+                                nominal_contact_threshold_m + 0.3
+                        )
                         result = {
                             "completed": True,
+                            "safe_stop_verified": safe_stop_verified,
+                            "minimum_required_center_distance_m": round(
+                                nominal_contact_threshold_m + 0.3, 3
+                            ),
                             "reason": scenario_end_reason,
                             "scenario": teacher_scenario.key,
                             "frame_id": onboard_frame_id,
@@ -2678,6 +2709,12 @@ def main():
                             ),
                             "kinematic_motion_guard": bool(motion_guard_triggered),
                             "pedestrian_crossing_started": bool(crossing_started),
+                            "crossing_started_sim_s": crossing_started_sim_s,
+                            "brake_before_crossing_s": (
+                                round(crossing_started_sim_s - first_brake_time_s, 3)
+                                if crossing_started_sim_s is not None
+                                and first_brake_time_s is not None else None
+                            ),
                             "pedestrian_motion_verified": bool(
                                 pedestrian_walk_motion_confirmed
                             ),
@@ -2717,6 +2754,8 @@ def main():
                             "TEACHER DEMO | CYCLE COMPLETE | "
                             f"scenario={teacher_scenario.key} | "
                             f"reason={scenario_end_reason} | "
+                            f"safe_stop_verified={safe_stop_verified} | "
+                            f"ped_walked={result['pedestrian_walked_m']}m | "
                             f"minimum_center_distance={result['minimum_center_distance_m']}m",
                             flush=True,
                         )
