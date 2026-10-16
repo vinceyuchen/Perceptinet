@@ -297,6 +297,8 @@ class DriverModeRenderer:
             return DANGER_RED
         if level == "CAUTION" or action in {"SLOWING", "BRAKING"}:
             return ALERT_YELLOW
+        if (snapshot.get("experiment") or {}).get("scenario") == "rain_v2i":
+            return ALERT_YELLOW  # reduced visibility/communications != clear
         return SAFE_GREEN
 
     def _target_heading(self, canvas: np.ndarray, label: str,
