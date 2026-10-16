@@ -308,12 +308,13 @@ def main(argv=None) -> int:
         print("Closing the Dashboard also stops the launcher.\n", flush=True)
 
         while args.cycles == 0 or rounds < args.cycles:
-            # Recheck simulator responsiveness between cycles.
-            if rounds > 0:
-                wait_for_carla_rpc(args.carla_ready_timeout)
             if dashboard.poll() is not None:
                 print("Dashboard closed. Ending demonstration.")
                 break
+            # Recheck simulator responsiveness between cycles; allow an
+            # operator-closed dashboard to terminate without extra waiting.
+            if rounds > 0:
+                wait_for_carla_rpc(args.carla_ready_timeout)
             STOP_FILE.unlink(missing_ok=True)
             CYCLE_FILE.unlink(missing_ok=True)
             env = os.environ.copy()
