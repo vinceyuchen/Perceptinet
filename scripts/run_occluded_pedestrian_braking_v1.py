@@ -1727,15 +1727,28 @@ def main():
                     )
                 )
 
-                # Simulation-only motion guard.
-                # A moving Ego must get closer to the test
-                # pedestrian. Stop immediately if the geometry
-                # becomes inconsistent instead of allowing a
-                # runaway vehicle through the CARLA map.
-                if (
-                    next_distance_to_pedestrian
-                    > ego_to_pedestrian_m + 0.001
-                ):
+                # Simulation motion guard. For a STATIC pedestrian the
+                # original distance-to-target monotonicity check is kept
+                # (important for standalone validation). For Teacher Demo
+                # the walker MOVES LATERALLY; genuine forward progress can
+                # therefore increase Euclidean separation. Guard Ego
+                # forward progress instead of incorrectly forcing a stop.
+                step_forward_progress_m = (
+                    (next_ego_location.x - ego_now.location.x)
+                    * ego_path_forward.x
+                    + (next_ego_location.y - ego_now.location.y)
+                    * ego_path_forward.y
+                )
+                invalid_motion = (
+                    (not math.isfinite(step_forward_progress_m))
+                    or (
+                        step_forward_progress_m <= 0
+                        if teacher_demo else
+                        next_distance_to_pedestrian >
+                        ego_to_pedestrian_m + 0.001
+                    )
+                )
+                if invalid_motion:
                     ego_command_speed_mps = 0.0
                     ego_speed_this_tick_mps = 0.0
                     motion_guard_triggered = True
