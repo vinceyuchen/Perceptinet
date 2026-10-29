@@ -14,7 +14,7 @@ A Python-based autonomous-driving research prototype that combines onboard and r
 [![OpenCV](https://img.shields.io/badge/Vision-OpenCV-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org/)
 ![Project](https://img.shields.io/badge/Status-Research%20Prototype-00796B)
 
-[Architecture](#system-architecture) · [Scenarios](#comparative-scenarios) · [Quick Start](#quick-start) · [Results](#evaluation--reporting) · [Limitations](#scope--limitations)
+[Architecture](#system-architecture) · [Demos](#demo-showcase) · [Scenarios](#comparative-scenarios) · [Quick Start](#quick-start) · [Results](#evaluation--reporting) · [Limitations](#scope--limitations)
 
 </div>
 
@@ -70,6 +70,18 @@ flowchart TB
 | **Communication** | Python V2I packet model; simulation-time queue for impaired delivery |
 | **Decision & control** | TTC-based Risk Engine and deterministic braking controller |
 | **Observability** | OpenCV-based Driver/Pro dashboards; JSON, CSV and optional PDF reporting |
+
+## Demo showcase
+
+Two short recordings from the CARLA experiments show the **same occluded pedestrian crossing** under different communication conditions. Each recording includes the onboard and RSU feeds plus the live dashboard.
+
+| Scenario 1 — normal V2I | Scenario 2 — degraded V2I |
+| :---: | :---: |
+| [![Clear-weather demo: pedestrian crossing and ego STOPPED state](assets/scenario-1.gif)](assets/scenario-1.mp4) | [![Rain demo: V2I impairment and CONTACT (SIM) dashboard status](assets/scenario-2.gif)](assets/scenario-2.mp4) |
+| Clear-weather RSU warning, braking and controller STOPPED state | Heavy rain, injected communication blackout and observed **kinematic footprint contact** |
+| [Watch the full recording (MP4)](assets/scenario-1.mp4) | [Watch the full recording (MP4)](assets/scenario-2.mp4) |
+
+> **Recorded evidence:** These clips show the demo output, not a production vehicle test. The `CONTACT (SIM)` indicator in Scenario 2 denotes geometric overlap in the kinematic simulation—not a verified physics-based collision. GitHub displays the animated GIF previews after the four media assets are uploaded to `assets/`.
 
 ## Comparative scenarios
 
