@@ -1,0 +1,64 @@
+name: Core Python checks
+
+# This workflow intentionally validates CARLA-independent components.
+# Full simulation / GPU inference needs a Windows CARLA environment.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "control/**"
+      - "fusion/**"
+      - "risk/**"
+      - "v2i/**"
+      - "metrics/**"
+      - "simulation/pedestrian_crossing.py"
+      - "simulation/teacher_scenarios.py"
+      - "scripts/generate_teacher_demo_report.py"
+      - "scripts/test_braking_controller.py"
+      - "scripts/test_risk_engine.py"
+      - "scripts/test_v2i_channel.py"
+      - "scripts/test_metrics_collector.py"
+      - "scripts/test_teacher_demo_report.py"
+      - ".github/workflows/core-checks.yml"
+  pull_request:
+    paths:
+      - "control/**"
+      - "fusion/**"
+      - "risk/**"
+      - "v2i/**"
+      - "metrics/**"
+      - "simulation/pedestrian_crossing.py"
+      - "simulation/teacher_scenarios.py"
+      - "scripts/generate_teacher_demo_report.py"
+      - "scripts/test_braking_controller.py"
+      - "scripts/test_risk_engine.py"
+      - "scripts/test_v2i_channel.py"
+      - "scripts/test_metrics_collector.py"
+      - "scripts/test_teacher_demo_report.py"
+      - ".github/workflows/core-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: CPU-only regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check Python syntax
+        run: |
+          python -m compileall -q control risk v2i fusion metrics
+          python -m py_compile simulation/pedestrian_crossing.py simulation/teacher_scenarios.py scripts/generate_teacher_demo_report.py
+      - name: Run CARLA-independent tests
+        run: |
+          python scripts/test_braking_controller.py
+          python scripts/test_risk_engine.py
+          python scripts/test_v2i_channel.py
+          python scripts/test_metrics_collector.py
+          python scripts/test_teacher_demo_report.py
