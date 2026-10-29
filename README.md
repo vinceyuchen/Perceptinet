@@ -13,8 +13,9 @@ A Python-based autonomous-driving research prototype that combines onboard and r
 [![YOLO26n](https://img.shields.io/badge/Perception-YOLO26n-5B3FD0)](https://docs.ultralytics.com/)
 [![OpenCV](https://img.shields.io/badge/Vision-OpenCV-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org/)
 ![Project](https://img.shields.io/badge/Status-Research%20Prototype-00796B)
+[![Core Python checks](https://github.com/vinceyuchen/Perceptinet/actions/workflows/core-checks.yml/badge.svg?branch=main)](https://github.com/vinceyuchen/Perceptinet/actions/workflows/core-checks.yml)
 
-[Architecture](#system-architecture) · [Demos](#demo-showcase) · [Scenarios](#comparative-scenarios) · [Quick Start](#quick-start) · [Results](#evaluation--reporting) · [Limitations](#scope--limitations)
+[Watch demos](#demo-showcase) · [Architecture](#system-architecture) · [Scenarios](#comparative-scenarios) · [Quick Start](#quick-start) · [Engineering notes](docs/ENGINEERING_NOTES.md) · [Results](#evaluation--reporting)
 
 </div>
 
@@ -34,6 +35,18 @@ The project models the complete **perception → communication → fusion → ri
 - **Configurable V2I fault injection** — timestamped packets, simulation-time delivery queues, latency/jitter, packet loss, stale-data rejection, and temporary blackouts.
 - **Risk-aware speed control** — path-relative distance, closing speed, time-to-collision (**TTC**), hazard levels, and a deterministic braking controller.
 - **Live observability** — interactive **Driver Mode / Pro Mode** dashboards, per-cycle telemetry, JSON/CSV exports, and comparative reports.
+
+## Demo showcase
+
+Two recordings from the CARLA experiments show the **same occluded pedestrian crossing** under different communication conditions. Each recording includes the onboard and RSU feeds plus the live dashboard.
+
+| Scenario 1 — normal V2I | Scenario 2 — degraded V2I |
+| :---: | :---: |
+| [![Clear-weather demo: pedestrian crossing and ego STOPPED state](assets/scenario-1.gif)](assets/scenario-1.mp4) | [![Rain demo: V2I impairment and CONTACT (SIM) dashboard status](assets/scenario-2.gif)](assets/scenario-2.mp4) |
+| Clear-weather RSU warning, braking and controller STOPPED state | Heavy rain, injected communication blackout and observed **kinematic footprint contact** |
+| [Watch the full recording (MP4)](assets/scenario-1.mp4) | [Watch the full recording (MP4)](assets/scenario-2.mp4) |
+
+> **Recorded evidence:** The GIFs are short previews; click either image or its MP4 link to see the complete recording. These are simulated CARLA runs, not a production vehicle test. Scenario 2's `CONTACT (SIM)` means geometric overlap in the kinematic model—not a validated physical collision.
 
 ## System architecture
 
@@ -71,18 +84,6 @@ flowchart TB
 | **Decision & control** | TTC-based Risk Engine and deterministic braking controller |
 | **Observability** | OpenCV-based Driver/Pro dashboards; JSON, CSV and optional PDF reporting |
 
-## Demo showcase
-
-Two short recordings from the CARLA experiments show the **same occluded pedestrian crossing** under different communication conditions. Each recording includes the onboard and RSU feeds plus the live dashboard.
-
-| Scenario 1 — normal V2I | Scenario 2 — degraded V2I |
-| :---: | :---: |
-| [![Clear-weather demo: pedestrian crossing and ego STOPPED state](assets/scenario-1.gif)](assets/scenario-1.mp4) | [![Rain demo: V2I impairment and CONTACT (SIM) dashboard status](assets/scenario-2.gif)](assets/scenario-2.mp4) |
-| Clear-weather RSU warning, braking and controller STOPPED state | Heavy rain, injected communication blackout and observed **kinematic footprint contact** |
-| [Watch the full recording (MP4)](assets/scenario-1.mp4) | [Watch the full recording (MP4)](assets/scenario-2.mp4) |
-
-> **Recorded evidence:** These clips show the demo output, not a production vehicle test. The `CONTACT (SIM)` indicator in Scenario 2 denotes geometric overlap in the kinematic simulation—not a verified physics-based collision. GitHub displays the animated GIF previews after the four media assets are uploaded to `assets/`.
-
 ## Comparative scenarios
 
 Two controlled intersection/occlusion experiments share the **same pedestrian crossing configuration, perception model, scene geometry, and control logic**. The treatment changes the weather visualization and V2I reliability.
@@ -102,7 +103,7 @@ The crossing begins when the pedestrian is about **11.5 m** longitudinally ahead
 
 > **Experimental integrity:** CARLA rain changes the simulated scene's appearance. The communication degradation is **injected separately in Python**; the project does not claim that CARLA weather physically creates RF interference. The baseline V2I model annotates latency, while Scenario 2 uses a queue that withholds packets until their simulated delivery time.
 
-See [Scenario comparison and experimental notes](SCENARIO_2_COMPARISON_GUIDE.md).
+For reproducible parameters and interpretation, see [Scenario comparison](SCENARIO_2_COMPARISON_GUIDE.md) and [Engineering notes](docs/ENGINEERING_NOTES.md).
 
 ## Quick start
 
@@ -170,7 +171,7 @@ py -3.12 .\scripts\test_teacher_pedestrian_crossing.py
 py -3.12 .\scripts\test_teacher_demo_report.py
 ```
 
-These cover selected Python components; they do **not** replace a full live CARLA validation run.
+These cover selected Python components; they do **not** replace a full live CARLA validation run. The [CPU-only GitHub Actions checks](.github/workflows/core-checks.yml) run the CARLA-independent regression subset automatically; see the [engineering notes](docs/ENGINEERING_NOTES.md) for implementation details and test scope.
 
 ## Repository structure
 
