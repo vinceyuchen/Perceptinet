@@ -161,17 +161,31 @@ py -3.12 .\scripts\generate_teacher_demo_report.py
 
 Reports are written to `results/teacher_demo/report/` as **PDF, CSV, and JSON**. Missing run data are left pending rather than replaced with fabricated measurements. Runtime artifacts are ignored by Git.
 
-### Focused regression tests
+### Verification & test scope
+
+The [Core Python checks workflow](.github/workflows/core-checks.yml) can be run automatically on relevant code changes or manually from [GitHub Actions](https://github.com/vinceyuchen/Perceptinet/actions/workflows/core-checks.yml). It executes **eight source-level regressions** on Python 3.12 without launching CARLA:
+
+| Area | Automated checks |
+| --- | --- |
+| Risk & braking | [TTC risk assessment](scripts/test_risk_engine.py), [deterministic braking](scripts/test_braking_controller.py) |
+| V2I & telemetry | [V2I packet model](scripts/test_v2i_channel.py), [metrics collection](scripts/test_metrics_collector.py) |
+| Sensor fusion | [Fusion engine](scripts/test_fusion_engine.py), [temporal fusion](scripts/test_temporal_fusion.py) |
+| Demo reliability | [Per-cycle output paths](scripts/test_teacher_demo_paths.py), [data report generation](scripts/test_teacher_demo_report.py) |
+
+Run the same checks locally from the repository root:
 
 ```powershell
 py -3.12 .\scripts\test_risk_engine.py
 py -3.12 .\scripts\test_braking_controller.py
 py -3.12 .\scripts\test_v2i_channel.py
-py -3.12 .\scripts\test_teacher_pedestrian_crossing.py
+py -3.12 .\scripts\test_metrics_collector.py
+py -3.12 .\scripts\test_fusion_engine.py
+py -3.12 .\scripts\test_temporal_fusion.py
+py -3.12 .\scripts\test_teacher_demo_paths.py
 py -3.12 .\scripts\test_teacher_demo_report.py
 ```
 
-These cover selected Python components; they do **not** replace a full live CARLA validation run. The [CPU-only GitHub Actions checks](.github/workflows/core-checks.yml) run the CARLA-independent regression subset automatically; see the [engineering notes](docs/ENGINEERING_NOTES.md) for implementation details and test scope.
+**Important:** These are *targeted unit/regression checks*, not evidence of a successful full CARLA run, verified physical braking or production safety. Live scenario testing requires CARLA, cameras, compatible model weights and the appropriate inference device. The current workflow run status must be checked on GitHub Actions; merely adding the workflow does not establish a passing result.
 
 ## Repository structure
 
